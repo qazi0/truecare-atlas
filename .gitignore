@@ -1,0 +1,50 @@
+# --- Build / runtime artifacts ---
+.env
+.env.*
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.next/
+.turbo/
+dist/
+build/
+out/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# --- Dev-internal markdown (Option B: keep public docs, exclude internal planning) ---
+# Public docs (TRACKED): README.md, docs/*.md
+# Internal docs (IGNORED below): live on disk for cross-session resume but never enter the repo
+CLAUDE.md
+PLAN.md
+PROGRESS.md
+COMMAND_LOG.md
+*.local.md
+_internal*.md
+
+# --- Lovable scaffold export (local reference material only) ---
+_lovable_v0/
+
+# --- Databricks bundle local state ---
+.databricks/
+
+# --- Frontend lock files NOT ignored (commit these for reproducible installs) ---
+# (intentionally no entry — pnpm-lock.yaml / package-lock.json must be committed)
+
+# --- Secrets safety net ---
+*.pem
+*.key
+secrets.json
+mapbox.token
+databricks.token
