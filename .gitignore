@@ -39,8 +39,8 @@ _lovable_v0/
 # --- Databricks bundle local state ---
 .databricks/
 
-# --- Frontend lock files NOT ignored (commit these for reproducible installs) ---
-# (intentionally no entry — pnpm-lock.yaml / package-lock.json must be committed)
+# --- Lock files NOT ignored (commit for reproducible installs) ---
+# pnpm-lock.yaml, uv.lock — both committed intentionally
 
 # --- Secrets safety net ---
 *.pem

@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     databricks_host: str = "https://dbc-842dd1eb-38c2.cloud.databricks.com"
-    databricks_token: str = ""
+    databricks_profile: str = "siraj-workspace"
     warehouse_id: str = "7180e1001ad3c807"
     catalog: str = "workspace"
     schema_name: str = "default"

@@ -18,9 +18,8 @@ TrustMap India turns 10,000 noisy Indian healthcare facility records into a trus
 ```bash
 # Backend
 cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-PYTHONPATH=. uvicorn app.main:app --reload
+uv sync
+uv run uvicorn app.main:app --reload
 
 # Frontend
 cd frontend
