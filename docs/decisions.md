@@ -59,3 +59,56 @@ Capability distribution: 15 has_24x7, 13 has_maternity, 6 has_oncology, 1 has_ic
 3. STRING return + REGEXP_REPLACE + `from_json` — tested and working
 
 **Decision**: Option 3. The model consistently returns valid JSON (with markdown fences). Stripping fences via `REGEXP_REPLACE('(?s)^\\s*```json\\s*|\\s*```\\s*$', '')` and parsing with `from_json` gives 98-100% success rate.
+
+---
+
+## D004: Full 10K extraction — 100% parse rate (2026-04-26)
+
+**Context**: Databricks job run 185191523954705 ran clean→extract on all 10K rows.
+
+**Query**:
+```sql
+SELECT COUNT(*) AS total,
+  SUM(CASE WHEN extraction_success THEN 1 ELSE 0 END) AS parsed
+FROM workspace.default.gold_facility_capabilities
+```
+**Result**: 10,000 total, 10,000 parsed — **100% parse rate**.
+
+**Conclusion**: The STRING + from_json approach with Llama 3.3 70B is fully reliable at scale. No fallback to Pandas UDF needed.
+
+---
+
+## D005: Trust score distribution (2026-04-26)
+
+**Context**: Phase 3 trust scorer (rules R1-R8) over 10K facilities.
+
+**Query**:
+```sql
+SELECT trust_score_bucket, COUNT(*), ROUND(AVG(trust_score), 1), ROUND(AVG(flag_count), 2),
+  SUM(CASE WHEN r6_modality_contradiction THEN 1 ELSE 0 END) AS modality
+FROM workspace.default.gold_facility_trust
+GROUP BY trust_score_bucket ORDER BY trust_score_bucket
+```
+**Result**:
+| Bucket | Count | Avg Score | Avg Flags | Modality Contradictions |
+|--------|-------|-----------|-----------|------------------------|
+| high   | 9,956 | 97.0      | 0.28      | 0                      |
+| mid    | 44    | 54.3      | 3.02      | 24                     |
+
+No facilities in the "low" bucket. 99.56% score high trust — most facilities don't have enough evidence to trigger rules, which is the correct behavior (no evidence ≠ lying).
+
+**Agasthiyar Siddha check**: Trust 40, flags R1+R3+R4+R6 — correctly flagged as the known contradiction case (Ayurvedic hospital claiming medicalOncology).
+
+---
+
+## D006: Vector Search index — decimal columns not supported (2026-04-26)
+
+**Context**: Creating DELTA_SYNC index on gold_facility_trust for the agent's vector_search tool.
+
+**Learnings**:
+1. `--json` CLI flag is exclusive with positional args — all params must go in JSON body
+2. DELTA_SYNC requires `pipeline_type: "TRIGGERED"` or `"CONTINUOUS"` in the spec
+3. Source table must have Change Data Feed enabled (`ALTER TABLE ... SET TBLPROPERTIES (delta.enableChangeDataFeed = true)`)
+4. `decimal(N,M)` columns are NOT supported in `columns_to_sync` — must exclude lat/lng
+
+**Decision**: Exclude latitude/longitude from vector search sync. Geo queries use SQL Haversine directly (geo_search tool), not vector search. Vector search handles semantic + capability filtering only.

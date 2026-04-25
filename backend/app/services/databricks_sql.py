@@ -184,6 +184,22 @@ def query_facilities_by_capability(
     return [_row_to_facility_hit(r) for r in rows]
 
 
+def query_facilities_by_text(query: str, k: int = 20) -> list[FacilityHit]:
+    """Simple text search across name, city, state, capabilities_caption."""
+    sql = """
+        SELECT t.*
+        FROM workspace.default.gold_facility_trust t
+        WHERE LOWER(t.name) LIKE LOWER(CONCAT('%', ?, '%'))
+           OR LOWER(t.city) LIKE LOWER(CONCAT('%', ?, '%'))
+           OR LOWER(t.state_canon) LIKE LOWER(CONCAT('%', ?, '%'))
+           OR LOWER(t.capabilities_caption) LIKE LOWER(CONCAT('%', ?, '%'))
+        ORDER BY t.trust_score DESC
+        LIMIT ?
+    """
+    rows = _execute(sql, [query, query, query, query, k])
+    return [_row_to_facility_hit(r) for r in rows]
+
+
 def query_facility_by_id(facility_id: str) -> FacilityFull:
     """Full facility record: gold_facility_trust JOIN silver_facility."""
     sql = """

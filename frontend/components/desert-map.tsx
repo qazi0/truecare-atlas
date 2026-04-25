@@ -49,12 +49,17 @@ export function DesertMap({
   capability,
   level,
   onRegionClick,
-}: DesertMapProps) {
+  onCapabilityChange,
+}: DesertMapProps & { onCapabilityChange?: (cap: string) => void }) {
   const [activeCap, setActiveCap] = useState(capability);
 
-  const filtered = aggregates.filter((r) => r.capability === activeCap);
-  // Sort by verified desc
-  const sorted = [...filtered].sort((a, b) => b.verified_count - a.verified_count);
+  const handleCapChange = (cap: string) => {
+    setActiveCap(cap);
+    onCapabilityChange?.(cap);
+  };
+
+  // Data is pre-filtered by backend — just sort
+  const sorted = [...aggregates].sort((a, b) => b.verified_count - a.verified_count);
 
   return (
     <div className="flex flex-col h-full gap-3 p-4">
@@ -63,7 +68,7 @@ export function DesertMap({
         {CAPABILITY_OPTIONS.map((opt) => (
           <button
             key={opt.key}
-            onClick={() => setActiveCap(opt.key)}
+            onClick={() => handleCapChange(opt.key)}
             className="text-xs px-2 py-1 rounded-full border transition-colors"
             style={
               activeCap === opt.key

@@ -11,13 +11,16 @@ import { FacilityCard } from "./facility-card";
 import { TrustPanel } from "./trust-panel";
 import { ErrorBanner } from "./error-banner";
 import { useStream } from "@/hooks/use-stream";
-import type { FacilityFull } from "@/lib/types";
+import type { FacilityHit, FacilityFull } from "@/lib/types";
+
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
 const DEMO_QUERIES = [
-  "Hospitals in Bihar with NICU and blood bank",
-  "Dialysis centers in Rajasthan near Jaipur",
-  "ICU + emergency surgery in Maharashtra",
-  "Maternity hospitals with 24×7 in UP",
+  "NICU Bihar",
+  "oncology Maharashtra",
+  "dialysis Rajasthan",
+  "maternity Tamil Nadu",
+  "Agasthiyar",
 ];
 
 export function SearchConsole() {
@@ -27,17 +30,31 @@ export function SearchConsole() {
   const [selectedFacility, setSelectedFacility] = useState<FacilityFull | null>(null);
   const [isFetchingFacility, setIsFetchingFacility] = useState(false);
   const [lastQuery, setLastQuery] = useState("");
+  const [quickResults, setQuickResults] = useState<FacilityHit[]>([]);
+  const [quickSearching, setQuickSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = useCallback(
-    (q: string) => {
+    async (q: string) => {
       if (!q.trim()) return;
       setLastQuery(q);
       setSelectedId(null);
       setSelectedFacility(null);
-      submit(q);
+      setQuickResults([]);
+      setQuickSearching(true);
+      try {
+        const resp = await fetch(`${BACKEND_URL}/api/search-quick?q=${encodeURIComponent(q)}&k=20`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setQuickResults(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        // fall through
+      } finally {
+        setQuickSearching(false);
+      }
     },
-    [submit]
+    []
   );
 
   const handleSelect = useCallback(async (facilityId: string) => {
@@ -84,17 +101,18 @@ export function SearchConsole() {
             onKeyDown={handleKeyDown}
             placeholder="Find hospitals in Bihar with NICU + blood bank…"
             className="bg-surface"
+            style={{ color: "var(--color-text)" }}
           />
           <Button
             onClick={() => handleSubmit(query)}
-            disabled={state.is_streaming || !query.trim()}
+            disabled={quickSearching || !query.trim()}
             size="sm"
           >
-            {state.is_streaming ? "Searching…" : "Search"}
+            {quickSearching ? "Searching…" : "Search"}
           </Button>
-          {(state.steps.length > 0 || state.facilities.length > 0) && (
+          {(quickResults.length > 0 || state.facilities.length > 0) && (
             <Button
-              onClick={reset}
+              onClick={() => { reset(); setQuickResults([]); setSelectedFacility(null); }}
               variant="ghost"
               size="sm"
               className="text-text-muted"
@@ -168,16 +186,14 @@ export function SearchConsole() {
 
           <ScrollArea className="flex-1">
             <div className="flex flex-col gap-2 p-3">
-              {state.facilities.length === 0 && !state.is_streaming && (
+              {quickResults.length === 0 && !quickSearching && state.facilities.length === 0 && !state.is_streaming && (
                 <div className="flex items-center justify-center py-16">
                   <p className="text-sm text-text-muted">
-                    {state.steps.length > 0
-                      ? "Processing…"
-                      : "Enter a query to search 10,000 facilities"}
+                    Search by facility name, city, state, or capability
                   </p>
                 </div>
               )}
-              {state.is_streaming && state.facilities.length === 0 && (
+              {quickSearching && (
                 <div className="flex items-center gap-2 py-4 px-1">
                   <motion.div
                     className="w-2 h-2 rounded-full"
@@ -185,9 +201,17 @@ export function SearchConsole() {
                     animate={{ scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }}
                     transition={{ duration: 0.8, repeat: Infinity }}
                   />
-                  <p className="text-xs text-text-muted">Agent is reasoning…</p>
+                  <p className="text-xs text-text-muted">Searching Databricks…</p>
                 </div>
               )}
+              {quickResults.map((facility) => (
+                <FacilityCard
+                  key={facility.facility_id}
+                  facility={facility}
+                  isSelected={selectedId === facility.facility_id}
+                  onSelect={handleSelect}
+                />
+              ))}
               {state.facilities.map((facility) => (
                 <FacilityCard
                   key={facility.facility_id}

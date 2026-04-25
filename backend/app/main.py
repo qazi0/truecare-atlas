@@ -61,3 +61,11 @@ def health():
     row = cursor.fetchone()
     cursor.close()
     return {"status": "ok", "user": row[0] if row else None}
+
+
+@app.get("/api/search-quick")
+def search_quick(q: str = "", k: int = 20):
+    from app.services.databricks_sql import query_facilities_by_text
+    if not q.strip():
+        return []
+    return query_facilities_by_text(q.strip(), k)

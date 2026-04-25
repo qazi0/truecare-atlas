@@ -7,7 +7,7 @@ import type { AggregateRow, AggregateLevel } from "@/lib/types";
 export default function MapPage() {
   const [aggregates, setAggregates] = useState<AggregateRow[]>([]);
   const [capability, setCapability] = useState("has_nicu");
-  const [level] = useState<AggregateLevel>("state");
+  const [level, setLevel] = useState<AggregateLevel>("state");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +79,10 @@ export default function MapPage() {
           capability={capability}
           level={level}
           onRegionClick={handleRegionClick}
+          onCapabilityChange={(cap) => {
+            setCapability(cap);
+            fetchAggregates(cap, level);
+          }}
         />
       </div>
     </div>
