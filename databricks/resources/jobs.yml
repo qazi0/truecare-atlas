@@ -1,0 +1,39 @@
+resources:
+  jobs:
+    trustmap_pipeline:
+      name: trustmap_pipeline
+      tasks:
+        - task_key: clean
+          description: "Phase 1: Bronze → Silver (null normalization, state/pincode cleanup, array parsing)"
+          notebook_task:
+            notebook_path: ../src/jobs/clean.sql
+
+        - task_key: extract
+          description: "Phase 2: Silver → Gold capabilities (LLM extraction via ai_query)"
+          depends_on:
+            - task_key: clean
+          notebook_task:
+            notebook_path: ../src/jobs/extract.sql
+
+        - task_key: score
+          description: "Phase 3: Gold capabilities → Gold trust (rules R1-R8 + LLM judge)"
+          depends_on:
+            - task_key: extract
+          python_wheel_task:
+            package_name: trustmap_india
+            entry_point: score
+
+        - task_key: aggregate
+          description: "Phase 4: Gold → pincode/state aggregates for desert map"
+          depends_on:
+            - task_key: score
+          notebook_task:
+            notebook_path: ../src/jobs/aggregate.sql
+
+        - task_key: index_sync
+          description: "Phase 4: Trigger vector search index sync + wait for READY"
+          depends_on:
+            - task_key: aggregate
+          python_wheel_task:
+            package_name: trustmap_india
+            entry_point: index_sync
