@@ -1,0 +1,9 @@
+command:
+  - python
+  - -m
+  - app.main
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    value_from: sql-warehouse
+  - name: TM_WAREHOUSE_ID
+    value_from: sql-warehouse

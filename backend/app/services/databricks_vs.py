@@ -9,7 +9,6 @@ from app.settings import settings
 
 _INDEX_COLS = [
     "facility_id", "name", "state_canon", "city", "pincode",
-    "latitude", "longitude", "facility_type_id",
     "trust_score", "trust_score_bucket",
     "has_icu", "has_nicu", "has_dialysis", "has_oncology",
     "has_emergency_surgery", "has_24x7", "has_maternity",
@@ -84,13 +83,18 @@ async def similarity_search(
     try:
         result = w.vector_search_indexes.query_index(**kwargs)
     except Exception as exc:
+        # Graceful fallback: if VS index is not ready, fall back to SQL text search
+        err_msg = str(exc).lower()
+        if "not ready" in err_msg or "not found" in err_msg or "syncing" in err_msg:
+            from app.services.databricks_sql import query_facilities_by_text
+            return query_facilities_by_text(query, k)
         raise VectorSearchError(str(exc)) from exc
 
     hits: list[FacilityHit] = []
     if not result or not result.result:
         return hits
 
-    manifest = result.result.manifest
+    manifest = result.manifest
     data_array = result.result.data_array or []
     if not manifest or not manifest.columns:
         return hits

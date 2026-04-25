@@ -1,7 +1,10 @@
 """Databricks SQL query helpers — all sync, intended to run in asyncio executor."""
 
 import json
+import re
 from typing import Any
+
+_CTRL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 from app.deps import get_sql_connection
 from app.errors import DatabricksQueryError, FacilityNotFoundError
@@ -28,15 +31,15 @@ _CAP_COLS = [
     "has_blood_bank", "has_anesthesia", "has_trauma", "has_cardiac_cath_lab",
 ]
 
-_RULE_LABELS: dict[str, tuple[str, Severity]] = {
-    "r1_anesthesia_gap":        ("Claims advanced surgery but no anesthesia evidence",     Severity.RED),
-    "r2_nicu_staffing_gap":     ("Claims NICU but no neonatologist/pediatrician evidence", Severity.RED),
-    "r3_cancer_specialty_gap":  ("Claims oncology but no oncologist/chemo/radiation evidence", Severity.RED),
-    "r4_24x7_gap":              ("Claims 24/7 but no emergency dept evidence",             Severity.YELLOW),
-    "r5_bed_count_contradiction": ("Bed count in text contradicts capacity column (>25%)",  Severity.YELLOW),
-    "r6_modality_contradiction": ("Traditional medicine description + allopathic specialty claims", Severity.RED),
-    "r7_scrape_artifact_density": ("Equipment list >50% non-medical strings (photo/scrape artifacts)", Severity.YELLOW),
-    "r8_evidence_sparsity":     ("Very sparse text — all claims unverifiable",             Severity.YELLOW),
+_RULE_META: dict[str, tuple[str, Severity, list[str]]] = {
+    "r1_anesthesia_gap":        ("Claims advanced surgery but no anesthesia evidence",     Severity.RED,    ["has_emergency_surgery_detail", "has_anesthesia_detail"]),
+    "r2_nicu_staffing_gap":     ("Claims NICU but no neonatologist/pediatrician evidence", Severity.RED,    ["has_nicu_detail"]),
+    "r3_cancer_specialty_gap":  ("Claims oncology but no oncologist/chemo/radiation evidence", Severity.RED, ["has_oncology_detail"]),
+    "r4_24x7_gap":              ("Claims 24/7 but no emergency dept evidence",             Severity.YELLOW, ["has_24x7_detail"]),
+    "r5_bed_count_contradiction": ("Bed count in text contradicts capacity column (>25%)",  Severity.YELLOW, []),
+    "r6_modality_contradiction": ("Traditional medicine description + allopathic specialty claims", Severity.RED, ["has_oncology_detail", "has_icu_detail", "has_emergency_surgery_detail"]),
+    "r7_scrape_artifact_density": ("Equipment list >50% non-medical strings (photo/scrape artifacts)", Severity.YELLOW, []),
+    "r8_evidence_sparsity":     ("Very sparse text — all claims unverifiable",             Severity.YELLOW, []),
 }
 
 
@@ -109,11 +112,34 @@ def _row_to_facility_hit(row: dict, distance_km: float | None = None) -> Facilit
     )
 
 
+def _extract_evidence(row: dict, detail_cols: list[str]) -> list[str]:
+    """Pull evidence_quote strings from has_*_detail struct columns."""
+    quotes: list[str] = []
+    for col in detail_cols:
+        detail = row.get(col)
+        if not detail:
+            continue
+        if isinstance(detail, str):
+            try:
+                detail = json.loads(detail)
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if isinstance(detail, dict):
+            quote = detail.get("evidence_quote")
+            if quote:
+                quotes.append(quote)
+    return quotes
+
+
 def _row_to_trust_report(row: dict) -> TrustReport:
     flags: list[TrustFlag] = []
-    for col, (label, severity) in _RULE_LABELS.items():
+    for col, (label, severity, detail_cols) in _RULE_META.items():
         if row.get(col):
-            flags.append(TrustFlag(rule_id=col, severity=severity, label=label))
+            evidence = _extract_evidence(row, detail_cols)
+            flags.append(TrustFlag(
+                rule_id=col, severity=severity, label=label,
+                evidence_quotes=evidence,
+            ))
     return TrustReport(
         facility_id=row["facility_id"],
         score=row.get("trust_score") or 0,
@@ -159,15 +185,24 @@ def query_facilities_by_geo(
     return [_row_to_facility_hit(r, distance_km=r.get("distance_km")) for r in rows]
 
 
+_CAP_ALIASES: dict[str, str] = {
+    "icu": "has_icu", "nicu": "has_nicu", "dialysis": "has_dialysis",
+    "oncology": "has_oncology", "emergency_surgery": "has_emergency_surgery",
+    "24x7": "has_24x7", "maternity": "has_maternity", "blood_bank": "has_blood_bank",
+    "anesthesia": "has_anesthesia", "trauma": "has_trauma",
+    "cardiac_cath_lab": "has_cardiac_cath_lab",
+}
+
+
 def query_facilities_by_capability(
     flags: list[str],
     filters: FacilityFilters | None = None,
     k: int = 20,
 ) -> list[FacilityHit]:
     """Filter by boolean capability columns."""
-    # Validate flags to prevent SQL injection — only allow known cap columns
     valid = set(_CAP_COLS)
-    safe_flags = [f for f in flags if f in valid]
+    normalized = [_CAP_ALIASES.get(f.lower().replace(" ", "_"), f) for f in flags]
+    safe_flags = [f for f in normalized if f in valid]
     if not safe_flags:
         return []
     flag_clauses = " AND ".join(f"t.{f} = TRUE" for f in safe_flags)
@@ -238,10 +273,20 @@ def query_facility_by_id(facility_id: str) -> FacilityFull:
             return [str(x) for x in val if x]
         return []
 
+    def _clean(s: str | None) -> str | None:
+        return _CTRL_CHAR_RE.sub("", s) if s else s
+
+    raw_desc = row.get("description")
+    phone_raw = row.get("phone_numbers")
+    if phone_raw is not None and hasattr(phone_raw, "__iter__") and not isinstance(phone_raw, str):
+        phone = ", ".join(str(x) for x in phone_raw)
+    else:
+        phone = str(phone_raw) if phone_raw else None
+
     return FacilityFull(
         **hit.model_dump(),
-        description=row.get("description"),
-        phone=", ".join(str(x) for x in row["phone_numbers"]) if row.get("phone_numbers") is not None and hasattr(row["phone_numbers"], '__iter__') and not isinstance(row["phone_numbers"], str) else row.get("phone_numbers"),
+        description=_clean(raw_desc),
+        phone=phone,
         address=address or None,
         specialties=_to_list(row.get("specialties")),
         procedures=_to_list(row.get("procedures")),

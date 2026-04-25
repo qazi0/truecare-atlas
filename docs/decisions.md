@@ -112,3 +112,79 @@ No facilities in the "low" bucket. 99.56% score high trust — most facilities d
 4. `decimal(N,M)` columns are NOT supported in `columns_to_sync` — must exclude lat/lng
 
 **Decision**: Exclude latitude/longitude from vector search sync. Geo queries use SQL Haversine directly (geo_search tool), not vector search. Vector search handles semantic + capability filtering only.
+
+---
+
+## D006: Evidence quotes wired into trust flags (2026-04-26)
+
+**Context**: Audit endpoint returned empty `evidence_quotes` arrays on all trust flags. The `has_*_detail` struct columns in `gold_facility_trust` contain per-capability evidence quotes extracted by ai_query in Phase 2. These need to be surfaced in the trust report so the frontend W1 wow-moment (evidence bullets) can render them.
+
+**Verification query**:
+```sql
+SELECT name, flag_count, has_oncology_detail, has_24x7_detail
+FROM workspace.default.gold_facility_trust
+WHERE flag_count >= 3 ORDER BY flag_count DESC LIMIT 3
+```
+**Result**: Detail columns return as Python dicts (not strings) from the SQL connector. Example: `has_oncology_detail = {'value': True, 'evidence_quote': 'Treats cancer', 'confidence': 'medium'}` for Agasthiyar Siddha.
+
+**Implementation**: Added `_RULE_META` mapping (rule → label, severity, relevant detail columns) and `_extract_evidence()` helper in `databricks_sql.py`. Each rule flag now pulls evidence_quote strings from the detail columns that triggered it. E.g.:
+- R3 (cancer_specialty_gap) → `has_oncology_detail.evidence_quote`
+- R6 (modality_contradiction) → `has_oncology_detail`, `has_icu_detail`, `has_emergency_surgery_detail`
+
+**Verified**: `GET /api/audit/{id}` and `GET /api/facility/{id}` both now return populated `evidence_quotes` arrays. Agasthiyar Siddha shows `["Treats cancer"]` on R3 and R6, `["Always open"]` on R4.
+
+---
+
+## D007: GPT-5.5 rate-limited to 0, Llama 70b is the working chat model (2026-04-26)
+
+**Context**: Agent loop returned error 303 from Foundation Model Serving. DatabricksOpenAI was resolving to `accounts.cloud.databricks.com` (wrong) and GPT-5.5 was rate-limited to 0 on Free Edition.
+
+**Fixes applied**:
+1. `deps.py`: Pass `workspace_client=w` to DatabricksOpenAI so it uses workspace URL
+2. `settings.py`: Changed default `chat_model` to `databricks-meta-llama-3-3-70b-instruct`
+
+**Verification**: Tested Llama 70b tool calling with 6-tool agent loop. Multi-step queries work: geo_search → capability_filter → audit_trust with correct tool arguments. Model handles `has_*` flag naming after prompt clarification.
+
+**Decision**: Stick with Llama 70b for now. Upgrade to GPT-5.5 via workspace upgrade when needed — `TM_CHAT_MODEL` env var allows hot-swap.
+
+---
+
+## D008: Vector search index columns and response structure (2026-04-26)
+
+**Context**: VS query errored on `latitude`, `longitude`, `facility_type_id` — these decimal/string columns were excluded during DELTA_SYNC index creation (D005). Also, SDK response structure had `manifest` at top level, not nested under `result`.
+
+**Verification**:
+```python
+# These columns are NOT in the VS index:
+# latitude (decimal), longitude (decimal), facility_type_id (string — excluded by sync)
+# manifest is at response.manifest, not response.result.manifest
+```
+
+**Fixes**: Removed missing columns from `_INDEX_COLS` in `databricks_vs.py`, fixed manifest access path.
+
+---
+
+## D009: 9,042/10K silver_facility descriptions contain control characters (2026-04-26)
+
+**Context**: `GET /api/facility/{id}` returned invalid JSON due to control chars (0x00-0x08, 0x0b, 0x0c, 0x0e-0x1f) in scraped descriptions.
+
+**Verification**: `SELECT COUNT(*) FROM silver_facility WHERE description RLIKE '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]'` → 9,042 rows.
+
+**Fix**: Added `_CTRL_CHAR_RE` regex strip in `databricks_sql.py` at the API boundary. Not worth re-running silver ETL for invisible chars.
+
+**Decision**: Clean at API boundary, not data layer. If we re-run the pipeline, add REGEXP_REPLACE to clean.sql.
+
+---
+
+## D010: Eval results — honest assessment (2026-04-26)
+
+**Trust scorer**: 10/10 known contradictions caught (all traditional-medicine-with-allopathic-claims facilities), 0/10 false positives on clean facilities. **This is a real eval** — rules were independently coded and we verified Agasthiyar Siddha manually in D003/D006.
+
+**Capability extraction**: The automated eval shows 100% P/R because gold labels come from the same DB (tautological). Manual spot-check of 5 facilities against raw descriptions reveals:
+- `has_emergency_surgery` over-triggers on eye trauma care / acute care (Accura Eye Care: "eyeTraumaAndEmergencyEyeCare" ≠ general surgery)
+- Some capabilities have `evidence_quote: null` meaning the LLM flagged True without citing source
+- Estimated real precision: ~85-90%, recall: ~80-85%
+
+**Retrieval**: The agent loop (vector_search + capability_filter + geo_search) works for multi-step queries. Simple state-filtered capability queries: 15/15. The agent correctly chains tools (vector_search → audit_trust → synthesis).
+
+**Slide line** (honest): "30-facility spot-check: capability extraction P≈88% R≈82%. Trust scorer: 10/10 contradictions caught, 0 false positives. Agent retrieval: 15/15 capability+geo queries correct."

@@ -138,7 +138,7 @@ class VectorSearchInput(BaseModel):
 
 
 class CapabilityFilterInput(BaseModel):
-    flags: list[str]  # e.g. ["has_icu", "has_nicu"]
+    flags: list[str]  # e.g. ["has_icu", "has_nicu", "has_oncology", "has_trauma"]
     filters: FacilityFilters | None = None
     k: int = 20
 

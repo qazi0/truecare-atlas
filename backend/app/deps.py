@@ -9,20 +9,24 @@ from app.settings import settings
 
 @lru_cache
 def get_workspace_client() -> WorkspaceClient:
-    return WorkspaceClient(profile=settings.databricks_profile)
+    if settings.databricks_profile:
+        return WorkspaceClient(profile=settings.databricks_profile)
+    # On Databricks Apps: SP auth is auto-injected via env vars
+    return WorkspaceClient()
 
 
 @lru_cache
 def get_sql_connection():
     w = get_workspace_client()
-    token = w.config.authenticate()["Authorization"].removeprefix("Bearer ")
+    cfg = w.config
     return databricks_sql.connect(
-        server_hostname=w.config.host.replace("https://", ""),
+        server_hostname=cfg.host.replace("https://", ""),
         http_path=f"/sql/1.0/warehouses/{settings.warehouse_id}",
-        access_token=token,
+        credentials_provider=lambda: cfg.authenticate,
     )
 
 
 @lru_cache
 def get_fm_client() -> DatabricksOpenAI:
-    return DatabricksOpenAI()
+    w = get_workspace_client()
+    return DatabricksOpenAI(workspace_client=w)

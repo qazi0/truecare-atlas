@@ -53,14 +53,34 @@ async def vector_search_handler(request: Request, exc: VectorSearchError):
 
 @app.get("/api/health")
 def health():
-    from app.deps import get_sql_connection
+    from app.deps import get_sql_connection, get_workspace_client
 
-    conn = get_sql_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT current_user()")
-    row = cursor.fetchone()
-    cursor.close()
-    return {"status": "ok", "user": row[0] if row else None}
+    checks: dict = {}
+
+    # SQL warehouse
+    try:
+        conn = get_sql_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT current_user()")
+        row = cursor.fetchone()
+        cursor.close()
+        checks["sql"] = {"ok": True, "user": row[0] if row else None}
+    except Exception as e:
+        checks["sql"] = {"ok": False, "error": str(e)}
+
+    # Vector search index
+    try:
+        w = get_workspace_client()
+        idx = w.vector_search_indexes.get_index(settings.vector_search_index)
+        checks["vector_search"] = {
+            "ok": idx.status.ready if idx.status else False,
+            "indexed_rows": idx.status.indexed_row_count if idx.status else 0,
+        }
+    except Exception as e:
+        checks["vector_search"] = {"ok": False, "error": str(e)}
+
+    all_ok = all(c.get("ok") for c in checks.values())
+    return {"status": "ok" if all_ok else "degraded", "checks": checks}
 
 
 @app.get("/api/search-quick")
@@ -69,3 +89,10 @@ def search_quick(q: str = "", k: int = 20):
     if not q.strip():
         return []
     return query_facilities_by_text(q.strip(), k)
+
+
+if __name__ == "__main__":
+    import os
+    import uvicorn
+    port = int(os.environ.get("DATABRICKS_APP_PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

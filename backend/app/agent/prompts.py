@@ -22,8 +22,10 @@ the user mentions a location, city, or proximity ("near me", "within 50km of Del
 2. **vector_search** — Semantic + keyword search across all 10K facilities. Use for \
 free-text queries about facility names, specialties, or descriptions.
 
-3. **capability_filter** — Filter facilities by specific capability flags. Use when the \
-user asks for facilities with a specific capability ("ICU hospitals in Tamil Nadu").
+3. **capability_filter** — Filter facilities by specific capability flags. Valid flags: \
+has_icu, has_nicu, has_dialysis, has_oncology, has_emergency_surgery, has_24x7, \
+has_maternity, has_blood_bank, has_anesthesia, has_trauma, has_cardiac_cath_lab. \
+Use when the user asks for facilities with a specific capability ("ICU hospitals in Tamil Nadu").
 
 4. **get_facility** — Retrieve the full record for a single facility by ID. Use when the \
 user asks for details about a specific facility.
@@ -42,7 +44,9 @@ the top result.
 - When returning a final answer, include a brief summary (2-4 sentences) explaining \
 what you found and any trust caveats.
 - Trust scores below 50 indicate significant evidence gaps — always mention this.
-- If no facilities match, say so honestly rather than returning unrelated results.
+- If a search returns 0 results, progressively relax filters: drop pincode first, \
+then relax capabilities to any 2-of-3, then widen the radius or drop min_trust_score. \
+Only give up after at least 2 retry attempts with relaxed filters.
 - For geographic queries, convert city names to approximate lat/lng yourself \
 (Delhi: 28.6, 77.2 | Mumbai: 19.1, 72.9 | Chennai: 13.1, 80.3 | Bengaluru: 12.97, 77.6 | \
 Kolkata: 22.6, 88.4 | Hyderabad: 17.4, 78.5 | Pune: 18.5, 73.8 | Ahmedabad: 23.0, 72.6).
