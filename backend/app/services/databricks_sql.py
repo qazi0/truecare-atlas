@@ -1,6 +1,7 @@
 """Databricks SQL query helpers — all sync, intended to run in asyncio executor."""
 
 import json
+import math
 import re
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.errors import DatabricksQueryError, FacilityNotFoundError
 from app.schemas import (
     AggregateLevel,
     AggregateRow,
+    AggregateRowWithCI,
     Capability,
     FacilityCapabilities,
     FacilityFilters,
@@ -41,6 +43,20 @@ _RULE_META: dict[str, tuple[str, Severity, list[str]]] = {
     "r7_scrape_artifact_density": ("Equipment list >50% non-medical strings (photo/scrape artifacts)", Severity.YELLOW, []),
     "r8_evidence_sparsity":     ("Very sparse text — all claims unverifiable",             Severity.YELLOW, []),
 }
+
+
+def wilson_ci(n: int, k: int, z: float = 1.96) -> tuple[float, float]:
+    """Wilson score interval for binomial proportion k/n at confidence z.
+    Returns (lower, upper) as proportions in [0, 1]."""
+    if n == 0:
+        return (0.0, 0.0)
+    p_hat = k / n
+    denom = 1 + z * z / n
+    center = p_hat + z * z / (2 * n)
+    spread = z * math.sqrt((p_hat * (1 - p_hat) + z * z / (4 * n)) / n)
+    lower = max(0.0, (center - spread) / denom)
+    upper = min(1.0, (center + spread) / denom)
+    return (round(lower, 4), round(upper, 4))
 
 
 def _execute(sql: str, params: list | None = None) -> list[dict[str, Any]]:
@@ -77,6 +93,10 @@ def _filters_clause(filters: FacilityFilters | None, alias: str = "t") -> tuple[
     return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
 
+def _clean_str(s: str | None) -> str | None:
+    return _CTRL_CHAR_RE.sub("", s) if s else s
+
+
 def _row_to_capabilities(row: dict) -> FacilityCapabilities:
     """Build FacilityCapabilities from a gold_facility_trust row."""
     caps: dict[str, Capability] = {}
@@ -91,7 +111,7 @@ def _row_to_capabilities(row: dict) -> FacilityCapabilities:
                 pass
         caps[col] = Capability(value=bool(row.get(col)), evidence_quote=evidence_quote)
     return FacilityCapabilities(
-        capabilities_caption=row.get("capabilities_caption") or "",
+        capabilities_caption=_clean_str(row.get("capabilities_caption")) or "",
         **caps,
     )
 
@@ -99,9 +119,9 @@ def _row_to_capabilities(row: dict) -> FacilityCapabilities:
 def _row_to_facility_hit(row: dict, distance_km: float | None = None) -> FacilityHit:
     return FacilityHit(
         facility_id=row["facility_id"],
-        name=row["name"],
-        city=row.get("city"),
-        state=row.get("state_canon"),
+        name=_clean_str(row["name"]) or "",
+        city=_clean_str(row.get("city")),
+        state=_clean_str(row.get("state_canon")),
         pincode=row.get("pincode"),
         latitude=float(row["latitude"]) if row.get("latitude") is not None else None,
         longitude=float(row["longitude"]) if row.get("longitude") is not None else None,
@@ -273,9 +293,6 @@ def query_facility_by_id(facility_id: str) -> FacilityFull:
             return [str(x) for x in val if x]
         return []
 
-    def _clean(s: str | None) -> str | None:
-        return _CTRL_CHAR_RE.sub("", s) if s else s
-
     raw_desc = row.get("description")
     phone_raw = row.get("phone_numbers")
     if phone_raw is not None and hasattr(phone_raw, "__iter__") and not isinstance(phone_raw, str):
@@ -285,7 +302,7 @@ def query_facility_by_id(facility_id: str) -> FacilityFull:
 
     return FacilityFull(
         **hit.model_dump(),
-        description=_clean(raw_desc),
+        description=_clean_str(raw_desc),
         phone=phone,
         address=address or None,
         specialties=_to_list(row.get("specialties")),
@@ -371,6 +388,60 @@ def query_aggregates(level: AggregateLevel, capability: str) -> list[AggregateRo
         )
         for r in rows
     ]
+
+
+def query_aggregates_with_ci(
+    level: AggregateLevel, capability: str
+) -> list[AggregateRowWithCI]:
+    """Aggregates enriched with Wilson score confidence intervals on verification rate."""
+    base_rows = query_aggregates(level=level, capability=capability)
+    result: list[AggregateRowWithCI] = []
+    for r in base_rows:
+        claimed = r.claimed_count
+        verified = r.verified_count
+        rate = round(verified / claimed, 4) if claimed > 0 else 0.0
+        ci_low, ci_high = wilson_ci(n=claimed, k=verified)
+        result.append(AggregateRowWithCI(
+            region_name=r.region_name,
+            region_level=r.region_level,
+            capability=r.capability,
+            claimed_count=claimed,
+            verified_count=verified,
+            population=r.population,
+            per_100k=r.per_100k,
+            verification_rate=rate,
+            ci_lower=ci_low,
+            ci_upper=ci_high,
+        ))
+    return result
+
+
+def query_facilities_for_export(facility_ids: list[str]) -> list[dict]:
+    """Fetch full facility data for CSV/JSON export. Joins gold trust + silver."""
+    if not facility_ids:
+        return []
+    placeholders = ", ".join("?" for _ in facility_ids)
+    sql = f"""
+        SELECT
+            t.facility_id, t.name, t.city, t.state_canon, t.pincode,
+            t.latitude, t.longitude, t.facility_type_id,
+            t.trust_score, t.trust_score_bucket,
+            t.has_icu, t.has_nicu, t.has_dialysis, t.has_oncology,
+            t.has_emergency_surgery, t.has_24x7, t.has_maternity,
+            t.has_blood_bank, t.has_anesthesia, t.has_trauma, t.has_cardiac_cath_lab,
+            t.capabilities_caption, t.flag_count,
+            t.r1_anesthesia_gap, t.r2_nicu_staffing_gap, t.r3_cancer_specialty_gap,
+            t.r4_24x7_gap, t.r5_bed_count_contradiction, t.r6_modality_contradiction,
+            t.r7_scrape_artifact_density, t.r8_evidence_sparsity,
+            s.description, s.phone_numbers,
+            s.address_line1, s.address_line2, s.address_line3,
+            s.specialties
+        FROM workspace.default.gold_facility_trust t
+        LEFT JOIN workspace.default.silver_facility s
+            ON t.facility_id = s.facility_id
+        WHERE t.facility_id IN ({placeholders})
+    """
+    return _execute(sql, facility_ids)
 
 
 def _pincode_col(capability: str) -> str:

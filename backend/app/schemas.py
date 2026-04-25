@@ -184,3 +184,81 @@ class SearchResult(BaseModel):
 class MapAggregateParams(BaseModel):
     capability: str = "has_nicu"
     level: AggregateLevel = AggregateLevel.STATE
+
+
+# ---------------------------------------------------------------------------
+# F7: Confidence intervals on aggregates
+# ---------------------------------------------------------------------------
+
+class AggregateRowWithCI(AggregateRow):
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    verification_rate: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# F8: NGO planning export
+# ---------------------------------------------------------------------------
+
+class ExportFormat(StrEnum):
+    CSV = "csv"
+    JSON = "json"
+
+
+class ExportRequest(BaseModel):
+    facility_ids: list[str]
+    format: ExportFormat = ExportFormat.CSV
+    include_trust_audit: bool = True
+    include_capabilities: bool = True
+
+
+class ExportRow(BaseModel):
+    facility_id: str
+    name: str
+    city: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    facility_type: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    description: str | None = None
+    trust_score: int | None = None
+    trust_flags: str | None = None
+    has_icu: bool = False
+    has_nicu: bool = False
+    has_dialysis: bool = False
+    has_oncology: bool = False
+    has_emergency_surgery: bool = False
+    has_24x7: bool = False
+    has_maternity: bool = False
+    has_blood_bank: bool = False
+    has_anesthesia: bool = False
+    has_trauma: bool = False
+    has_cardiac_cath_lab: bool = False
+    capabilities_caption: str = ""
+    specialties: str = ""
+    evidence_summary: str = ""
+
+
+# ---------------------------------------------------------------------------
+# F6: Validator agent
+# ---------------------------------------------------------------------------
+
+class ValidationFinding(BaseModel):
+    capability: str
+    claimed: bool
+    plausible: bool
+    reasoning: str
+    evidence_for: list[str] = []
+    evidence_against: list[str] = []
+
+
+class ValidatorResult(BaseModel):
+    facility_id: str
+    facility_name: str
+    overall_assessment: str
+    findings: list[ValidationFinding] = []
+    medical_standards_checked: list[str] = []
+    recommendation: str = ""
