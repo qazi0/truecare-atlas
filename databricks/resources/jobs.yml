@@ -7,3 +7,24 @@ resources:
           description: "Phase 1: Bronze → Silver (null normalization, state/pincode cleanup, array parsing)"
           notebook_task:
             notebook_path: ../src/jobs/clean.sql
+
+        - task_key: extract
+          description: "Phase 2: Silver → Gold capabilities (LLM extraction via ai_query)"
+          depends_on:
+            - task_key: clean
+          notebook_task:
+            notebook_path: ../src/jobs/extract.sql
+
+        - task_key: score
+          description: "Phase 3: Gold capabilities → Gold trust (rules R1-R8)"
+          depends_on:
+            - task_key: extract
+          notebook_task:
+            notebook_path: ../src/jobs/score.sql
+
+        - task_key: aggregate
+          description: "Phase 4: Gold → state/pincode aggregates for desert map"
+          depends_on:
+            - task_key: score
+          notebook_task:
+            notebook_path: ../src/jobs/aggregate.sql
