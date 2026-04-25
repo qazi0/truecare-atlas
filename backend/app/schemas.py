@@ -2,6 +2,10 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
 class Confidence(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
@@ -22,6 +26,26 @@ class Severity(StrEnum):
     YELLOW = "yellow"
     GREEN = "green"
 
+
+class AggregateLevel(StrEnum):
+    STATE = "state"
+    DISTRICT = "district"
+    PINCODE = "pincode"
+
+
+class SSEEventType(StrEnum):
+    STEP = "step"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    REASONING = "reasoning"
+    RESULT = "result"
+    ERROR = "error"
+    DONE = "done"
+
+
+# ---------------------------------------------------------------------------
+# Domain models
+# ---------------------------------------------------------------------------
 
 class Capability(BaseModel):
     value: bool
@@ -83,16 +107,80 @@ class FacilityFull(FacilityHit):
     trust_report: TrustReport | None = None
 
 
-class SSEEventType(StrEnum):
-    STEP = "step"
-    TOOL_CALL = "tool_call"
-    TOOL_RESULT = "tool_result"
-    REASONING = "reasoning"
-    RESULT = "result"
-    ERROR = "error"
-    DONE = "done"
-
-
 class SSEEvent(BaseModel):
     type: SSEEventType
     payload: dict
+
+
+# ---------------------------------------------------------------------------
+# Tool input schemas (§3.2)
+# ---------------------------------------------------------------------------
+
+class FacilityFilters(BaseModel):
+    state: str | None = None
+    district: str | None = None
+    pincode: str | None = None
+    facility_type: str | None = None
+    min_trust_score: int | None = None
+
+
+class GeoSearchInput(BaseModel):
+    lat: float
+    lng: float
+    radius_km: float = 30.0
+    filters: FacilityFilters | None = None
+
+
+class VectorSearchInput(BaseModel):
+    query: str
+    filters: FacilityFilters | None = None
+    k: int = 20
+
+
+class CapabilityFilterInput(BaseModel):
+    flags: list[str]  # e.g. ["has_icu", "has_nicu"]
+    filters: FacilityFilters | None = None
+    k: int = 20
+
+
+class GetFacilityInput(BaseModel):
+    facility_id: str
+
+
+class AuditTrustInput(BaseModel):
+    facility_id: str
+
+
+class AggregateByInput(BaseModel):
+    level: AggregateLevel
+    capability: str  # e.g. "has_nicu"
+
+
+# ---------------------------------------------------------------------------
+# Tool output / API response schemas (§3.3)
+# ---------------------------------------------------------------------------
+
+class AggregateRow(BaseModel):
+    region_name: str
+    region_level: AggregateLevel
+    capability: str
+    claimed_count: int
+    verified_count: int
+    population: int | None = None
+    per_100k: float | None = None
+
+
+class SearchRequest(BaseModel):
+    query: str
+    session_id: str | None = None
+
+
+class SearchResult(BaseModel):
+    facilities: list[FacilityHit]
+    summary: str
+    trace_id: str | None = None
+
+
+class MapAggregateParams(BaseModel):
+    capability: str = "has_nicu"
+    level: AggregateLevel = AggregateLevel.STATE
