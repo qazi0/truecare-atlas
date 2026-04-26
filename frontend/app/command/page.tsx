@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect, react/no-unescaped-entities */
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Activity, AlertOctagon, Brain, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, FileText, Filter, Loader2, Map, MapPin, Plus, Search, ShieldCheck, Zap } from "lucide-react";
@@ -19,6 +19,7 @@ const COMMAND_STATE_KEY = "truecare.cache.command.state";
 const FAST_SEARCH_TTL_MS = 5 * 60_000;
 const FACILITY_TTL_MS = 10 * 60_000;
 const VALIDATION_TTL_MS = 10 * 60_000;
+const SEARCH_PAGE_SIZE = 6;
 
 interface CommandCacheState {
   query: string;
@@ -47,6 +48,7 @@ function CommandContent() {
   const [intent, setIntent] = useState<IntentSearchResponse | null>(null);
   const [validation, setValidation] = useState<ValidatorResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(0);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [validationLoading, setValidationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +73,7 @@ function CommandContent() {
       setSelected(null);
       setValidation(null);
       setError(null);
+      setPage(0);
       setLoading(false);
       return;
     }
@@ -81,6 +84,7 @@ function CommandContent() {
     setValidation(null);
     setIntent(null);
     setError(null);
+    setPage(0);
     setLoading(true);
     if (mode === "deep") {
       void fetchIntent(urlQuery, mode)
@@ -134,6 +138,11 @@ function CommandContent() {
   }, [results, selectedId]);
 
   useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(results.length / SEARCH_PAGE_SIZE) - 1);
+    if (page > maxPage) setPage(maxPage);
+  }, [page, results.length]);
+
+  useEffect(() => {
     if (!selectedId) return;
     setSelected(null);
     setValidation(null);
@@ -163,6 +172,8 @@ function CommandContent() {
   }, [selectedId]);
 
   const activeQuery = urlQuery || query;
+  const totalPages = Math.max(1, Math.ceil(results.length / SEARCH_PAGE_SIZE));
+  const visibleResults = useMemo(() => results.slice(page * SEARCH_PAGE_SIZE, (page + 1) * SEARCH_PAGE_SIZE), [page, results]);
   const capKey = capabilityKeyFromQuery(activeQuery);
   const verified = results.filter((f) => deriveStatus(f) === "Verified").length;
   const review = results.filter((f) => deriveStatus(f) !== "Verified").length;
@@ -200,6 +211,14 @@ function CommandContent() {
   function shortlistFacility(id: string) {
     addToShortlist(id);
     notify("success", "Added to shortlist", "The facility is available in the shortlist workspace.");
+  }
+
+  function nextPage() {
+    if (page >= totalPages - 1) return;
+    const next = page + 1;
+    const nextVisible = results.slice(next * SEARCH_PAGE_SIZE, (next + 1) * SEARCH_PAGE_SIZE);
+    setPage(next);
+    if (nextVisible[0]) setSelectedId(nextVisible[0].facility_id);
   }
 
   return (
@@ -249,10 +268,18 @@ function CommandContent() {
           {error && <div className="mx-4 mb-3 rounded-md border border-alert/30 bg-alert-soft p-3 text-sm text-alert">{error}</div>}
           {loading ? <SearchSkeleton /> : (
             <ul className="flex flex-col gap-2 px-4 pb-4">
-              {results.map((facility, i) => (
+              {visibleResults.map((facility, i) => (
                 <ResultRow key={facility.facility_id} facility={facility} selected={facility.facility_id === selectedId} onSelect={() => setSelectedId(facility.facility_id)} onShortlist={shortlistFacility} index={i} />
               ))}
             </ul>
+          )}
+          {!loading && results.length > SEARCH_PAGE_SIZE && (
+            <div className="flex items-center justify-between border-t hairline px-4 py-3 text-[12px] text-muted-foreground">
+              <span>Page {page + 1} of {totalPages} · showing {visibleResults.length} of {results.length}</span>
+              <Button size="sm" variant="outline" className="h-8 text-[12px]" disabled={page >= totalPages - 1} onClick={nextPage}>
+                Next page <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           )}
           {!loading && results.length === 0 && <div className="p-4"><EmptyState title="No live matches" detail="Try a broader capability or geography." /></div>}
           <AgentActivity steps={stream.state.steps} traceId={stream.state.trace_id} isStreaming={stream.state.is_streaming} />

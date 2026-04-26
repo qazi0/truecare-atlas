@@ -66,7 +66,7 @@ export function AppShell({ children, topBarRight, hideRail = false }: { children
 function HeaderTagline() {
   return (
     <div className="ml-1 hidden items-center text-[10px] font-normal uppercase tracking-[0.24em] text-muted-foreground lg:flex">
-      Healthcare intelligence for planners who need proof
+      Healthcare intelligence for verified patient care
     </div>
   );
 }

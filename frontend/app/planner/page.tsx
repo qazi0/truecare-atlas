@@ -1,26 +1,48 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ClipboardList, Loader2, MapPin, Search } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, ClipboardList, Loader2, MapPin, Route, Search } from "lucide-react";
 import { AppShell, CapabilityBadge, EmptyState, StatusBadge, TrustRing } from "@/components/atlas/primitives";
 import { Button } from "@/components/ui/button";
 import { capabilityLabel, deriveStatus, formatLocation } from "@/lib/atlas";
 import type { CarePlanResponse } from "@/lib/types";
 
+const CARE_PROMPTS = [
+  "Mother in Patna needs NICU",
+  "Stroke patient near Delhi needs ICU transfer",
+  "Pregnancy emergency in Kerala needs maternity care",
+  "Dialysis access around Chennai within 50 km",
+  "Cancer referral in Mumbai with verified oncology evidence",
+];
+
+const PLAN_STEPS = [
+  "Resolve care need and geography",
+  "Search nearby verified capabilities",
+  "Rank by distance, trust, and evidence",
+  "Build call-first checklist",
+];
+
 export default function PlannerPage() {
-  const [query, setQuery] = useState("Mother in Patna needs NICU");
+  const [query, setQuery] = useState("");
   const [plan, setPlan] = useState<CarePlanResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [promptIdx, setPromptIdx] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setPromptIdx((i) => (i + 1) % CARE_PROMPTS.length), 3200);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!query.trim()) return;
+    const activeQuery = query.trim() || CARE_PROMPTS[promptIdx];
+    setQuery(activeQuery);
     setLoading(true);
     const data = await fetch("/api/care-plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query: activeQuery }),
     }).then((r) => r.ok ? r.json() : null).catch(() => null);
     setPlan(data);
     setLoading(false);
@@ -30,9 +52,16 @@ export default function PlannerPage() {
     <AppShell>
       <div className="sticky top-12 z-30 border-b hairline bg-background px-4 py-3">
         <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-          <div className="flex h-9 min-w-[280px] flex-1 items-center gap-2 rounded-md border hairline bg-surface px-3">
+          <div className="flex h-9 min-w-[280px] flex-[0_1_660px] items-center gap-2 rounded-md border hairline bg-surface px-3 focus-within:ring-2 focus-within:ring-primary/30">
             <Search className="h-4 w-4 text-muted-foreground" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} className="flex-1 bg-transparent text-[13px] outline-none" aria-label="Care need" />
+            <div className="relative min-w-0 flex-1">
+              <input value={query} onChange={(e) => setQuery(e.target.value)} className="relative z-10 w-full bg-transparent text-[13px] outline-none placeholder:text-transparent" aria-label="Care need" placeholder="" />
+              {!query && (
+                <span key={promptIdx} className="prompt-slide pointer-events-none absolute inset-0 z-20 flex items-center truncate text-[13px] text-muted-foreground">
+                  {CARE_PROMPTS[promptIdx]}
+                </span>
+              )}
+            </div>
           </div>
           <Button type="submit" size="sm" className="h-9" disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />} Plan care access</Button>
         </form>
@@ -40,7 +69,8 @@ export default function PlannerPage() {
 
       <div className="grid flex-1 grid-cols-1 gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="min-w-0">
-          {!plan && <EmptyState title="Enter a care need" detail="Example: Mother in Patna needs NICU." />}
+          {loading && <PlanActivity />}
+          {!loading && !plan && <EmptyState title="Enter a care need" detail="Example: Mother in Patna needs NICU." />}
           {plan && (
             <>
               <div className="mb-4 flex flex-wrap items-center gap-2 text-[12px]">
@@ -87,6 +117,29 @@ function Panel({ title, children, tone }: { title: string; children: React.React
     <div className="rounded-md border hairline bg-surface p-4">
       <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{tone === "alert" && <AlertTriangle className="h-3.5 w-3.5 text-alert" />}{title}</div>
       <ul className="flex list-disc flex-col gap-1 pl-4 text-[12px] text-muted-foreground">{children}</ul>
+    </div>
+  );
+}
+
+function PlanActivity() {
+  return (
+    <div className="mb-4 rounded-lg border border-primary/20 bg-primary-soft/60 p-4">
+      <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-primary-soft-foreground">
+        <Route className="h-4 w-4 text-primary" />
+        Building care access plan
+      </div>
+      <ol className="grid gap-2 sm:grid-cols-2">
+        {PLAN_STEPS.map((step, index) => (
+          <li key={step} className="flex items-center gap-2 rounded-md border hairline bg-surface/70 px-3 py-2 text-[12px]">
+            {index === PLAN_STEPS.length - 1 ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : <CheckCircle2 className="h-3.5 w-3.5 text-trust" />}
+            <span>{step}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Activity className="h-3.5 w-3.5" />
+        Ranking facilities and assembling verification warnings.
+      </div>
     </div>
   );
 }

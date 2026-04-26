@@ -3,18 +3,26 @@
 /* eslint-disable react-hooks/set-state-in-effect, react/no-unescaped-entities */
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Filter, Loader2, MessageSquare, Phone, UserPlus, X, Zap } from "lucide-react";
+import { Activity, Check, CheckCircle2, ChevronRight, Filter, Loader2, MessageSquare, Phone, UserPlus, X, Zap } from "lucide-react";
 import { AppShell, EmptyState } from "@/components/atlas/primitives";
 import { Button } from "@/components/ui/button";
 import { clearClientCache, readClientCache, writeClientCache } from "@/lib/client-cache";
-import type { AutoReviewSummary, ReviewTask } from "@/lib/types";
+import type { AutoReviewRunResponse, AutoReviewSummary, ReviewTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const FILTERS = ["Contradictions", "Low evidence", "Generated", "Open work"];
 const TABS = ["Urgent", "Phone verify", "Field visit", "Specialist review", "Low-risk", "Rejected"] as const;
 const REVIEW_CACHE_KEY = "truecare.cache.reviews";
 const REVIEW_TTL_MS = 30_000;
+const REVIEW_PAGE_SIZE = 8;
 const OPEN_STATUSES = new Set(["pending", "phone_verification"]);
+const TRIAGE_STEPS = [
+  "Pull next 50 generated candidates",
+  "Classify evidence gaps and contradictions",
+  "Assign phone, field, specialist, or low-risk buckets",
+  "Refresh queue summary",
+];
+type CounterFilter = "open" | "progress" | "contradictions" | "generated" | null;
 
 interface ReviewGroup {
   facilityId: string;
@@ -30,31 +38,47 @@ export default function ReviewPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Urgent");
   const [summary, setSummary] = useState<AutoReviewSummary | null>(null);
   const [triaging, setTriaging] = useState(false);
+  const [triageRun, setTriageRun] = useState<AutoReviewRunResponse | null>(null);
+  const [triageStep, setTriageStep] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [counterFilter, setCounterFilter] = useState<CounterFilter>(null);
+  const [page, setPage] = useState(0);
 
-  async function load() {
+  async function load(force = false) {
     const cached = readClientCache<ReviewTask[]>(REVIEW_CACHE_KEY);
-    if (cached?.length) {
+    if (!force && cached?.length) {
       setTasks(cached);
+      setLoading(false);
+      void fetch("/api/reviews/summary").then((r) => r.ok ? r.json() : null).then(setSummary).catch(() => null);
       return;
     }
+    setLoading(true);
     const data = await fetch("/api/reviews").then((r) => r.ok ? r.json() : []);
     const nextTasks = Array.isArray(data) ? data : [];
     if (nextTasks.length) writeClientCache(REVIEW_CACHE_KEY, nextTasks, REVIEW_TTL_MS);
     setTasks(nextTasks);
-    void fetch("/api/reviews/summary").then((r) => r.ok ? r.json() : null).then(setSummary).catch(() => null);
+    await fetch("/api/reviews/summary").then((r) => r.ok ? r.json() : null).then(setSummary).catch(() => null);
+    setLoading(false);
   }
 
   useEffect(() => { void load(); }, []);
 
   const filtered = useMemo(() => tasks.filter((task) => {
+    if (counterFilter === "open") return task.status === "pending";
+    if (counterFilter === "progress") return task.status === "phone_verification";
+    if (counterFilter === "contradictions") return task.severity === "red";
+    if (counterFilter === "generated") return task.source === "generated";
     if (active.includes("Contradictions") && task.severity !== "red") return false;
     if (active.includes("Low evidence") && task.severity !== "yellow") return false;
     if (active.includes("Generated") && task.source !== "generated") return false;
     if (active.includes("Open work") && !OPEN_STATUSES.has(task.status)) return false;
     return matchesTab(task, tab);
-  }), [active, tab, tasks]);
+  }), [active, counterFilter, tab, tasks]);
 
   const groups = useMemo(() => groupReviewTasks(filtered), [filtered]);
+  const totalPages = Math.max(1, Math.ceil(groups.length / REVIEW_PAGE_SIZE));
+  const visibleGroups = useMemo(() => groups.slice(page * REVIEW_PAGE_SIZE, (page + 1) * REVIEW_PAGE_SIZE), [groups, page]);
 
   const counters = {
     open: tasks.filter((t) => t.status === "pending").length,
@@ -63,24 +87,48 @@ export default function ReviewPage() {
     generated: tasks.filter((t) => t.source === "generated").length,
   };
 
+  useEffect(() => {
+    setPage(0);
+  }, [active, counterFilter, tab]);
+
+  useEffect(() => {
+    if (page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
+  }, [page, totalPages]);
+
   function toggle(filter: string) {
     setActive((items) => items.includes(filter) ? items.filter((item) => item !== filter) : [...items, filter]);
+    setPage(0);
+  }
+
+  function applyCounterFilter(filter: CounterFilter) {
+    setFilterLoading(true);
+    setPage(0);
+    window.setTimeout(() => {
+      setCounterFilter((current) => current === filter ? null : filter);
+      setFilterLoading(false);
+    }, 260);
   }
 
   async function runAutoTriage() {
+    const timer = window.setInterval(() => setTriageStep((step) => Math.min(TRIAGE_STEPS.length - 1, step + 1)), 450);
+    setTriageRun(null);
+    setTriageStep(0);
     setTriaging(true);
     await fetch("/api/reviews/auto-run?limit=50", { method: "POST" }).then((r) => r.ok ? r.json() : null).then((data) => {
       if (data?.summary) setSummary(data.summary);
+      if (data) setTriageRun(data);
     }).catch(() => null);
+    window.clearInterval(timer);
+    setTriageStep(TRIAGE_STEPS.length);
     clearClientCache(REVIEW_CACHE_KEY);
-    await load();
+    await load(true);
     setTriaging(false);
   }
 
   async function patch(id: string, body: Partial<ReviewTask> & { note?: string }) {
     await fetch(`/api/reviews/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     clearClientCache(REVIEW_CACHE_KEY);
-    await load();
+    await load(true);
   }
 
   async function patchMany(ids: string[], body: Partial<ReviewTask> & { note?: string }) {
@@ -90,7 +138,7 @@ export default function ReviewPage() {
       body: JSON.stringify(body),
     })));
     clearClientCache(REVIEW_CACHE_KEY);
-    await load();
+    await load(true);
   }
 
   async function addNote(ids: string[]) {
@@ -104,10 +152,10 @@ export default function ReviewPage() {
       <div className="sticky top-12 z-30 border-b hairline bg-background">
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">
           <h1 className="text-[16px] font-semibold tracking-tight">Review queue</h1>
-          <Counter label="Open" value={counters.open} />
-          <Counter label="In progress" value={counters.progress} tone="caution" />
-          <Counter label="Contradictions" value={counters.contradictions} tone="alert" />
-          <Counter label="Generated" value={counters.generated} />
+          <Counter label="Open" value={counters.open} active={counterFilter === "open"} onClick={() => applyCounterFilter("open")} />
+          <Counter label="In progress" value={counters.progress} tone="caution" active={counterFilter === "progress"} onClick={() => applyCounterFilter("progress")} />
+          <Counter label="Contradictions" value={counters.contradictions} tone="alert" active={counterFilter === "contradictions"} onClick={() => applyCounterFilter("contradictions")} />
+          <Counter label="Generated" value={counters.generated} active={counterFilter === "generated"} onClick={() => applyCounterFilter("generated")} />
           {summary && <span className="rounded-md border hairline bg-surface px-2 py-1 text-[11px] text-muted-foreground">{summary.total_candidates.toLocaleString()} candidates to {summary.buckets.phone_verify ?? 0} phone, {summary.buckets.field_visit_required ?? 0} field, {summary.buckets.auto_verified_low_risk ?? 0} low-risk</span>}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <Button size="sm" className="h-7 text-[11px]" disabled={triaging} onClick={runAutoTriage}>{triaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />} Auto-triage next 50</Button>
@@ -120,7 +168,9 @@ export default function ReviewPage() {
         </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
-        {groups.map((group) => (
+        {(triaging || triageRun) && <TriageActivity running={triaging} step={triageStep} run={triageRun} />}
+        {(loading || filterLoading) && <ReviewSkeleton />}
+        {!loading && !filterLoading && visibleGroups.map((group) => (
           <article key={group.facilityId} className="rounded-lg border hairline bg-surface">
             <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_220px]">
               <div className="min-w-0 border-b hairline p-4 lg:border-b-0 lg:border-r">
@@ -169,15 +219,112 @@ export default function ReviewPage() {
             </div>
           </article>
         ))}
-        {!groups.length && <EmptyState title="No review tasks match filters" />}
+        {!loading && !filterLoading && groups.length > REVIEW_PAGE_SIZE && (
+          <div className="flex items-center justify-between rounded-md border hairline bg-surface px-3 py-2 text-[12px] text-muted-foreground">
+            <span>Page {page + 1} of {totalPages} · showing {visibleGroups.length} of {groups.length} facility groups</span>
+            <Button size="sm" variant="outline" className="h-8 text-[12px]" disabled={page >= totalPages - 1} onClick={() => setPage((value) => Math.min(totalPages - 1, value + 1))}>
+              Next page <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+        {!loading && !filterLoading && !groups.length && <EmptyState title="No review tasks match filters" />}
       </div>
     </AppShell>
   );
 }
 
-function Counter({ label, value, tone }: { label: string; value: number; tone?: "caution" | "alert" }) {
+function Counter({ label, value, tone, active, onClick }: { label: string; value: number; tone?: "caution" | "alert"; active: boolean; onClick: () => void }) {
   const color = tone === "alert" ? "text-alert" : tone === "caution" ? "text-caution" : "text-foreground";
-  return <span className="inline-flex items-baseline gap-1.5 rounded-md border hairline bg-surface px-2 py-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span><span className={cn("font-mono text-[13px] font-semibold", color)}>{value}</span></span>;
+  return <button onClick={onClick} className={cn("inline-flex items-baseline gap-1.5 rounded-md border px-2 py-1 transition", active ? "border-primary bg-primary-soft text-primary" : "hairline bg-surface hover:border-primary/40")}><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span><span className={cn("font-mono text-[13px] font-semibold", color)}>{value}</span></button>;
+}
+
+function TriageActivity({ running, step, run }: { running: boolean; step: number; run: AutoReviewRunResponse | null }) {
+  return (
+    <div className="rounded-lg border border-primary/20 bg-primary-soft/60 p-3.5">
+      <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-primary-soft-foreground">
+        {running ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <CheckCircle2 className="h-4 w-4 text-trust" />}
+        Auto-triage agent
+        {run && <span className="ml-auto font-mono text-[11px] text-muted-foreground">{run.processed} processed · {run.created} created</span>}
+      </div>
+      <ol className="grid gap-2 lg:grid-cols-4">
+        {TRIAGE_STEPS.map((item, index) => {
+          const done = step > index;
+          const active = running && step === index;
+          return (
+            <li key={item} className="rounded-md border hairline bg-surface/80 px-3 py-2 text-[12px]">
+              <div className="flex items-center gap-2">
+                {active ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : done ? <CheckCircle2 className="h-3.5 w-3.5 text-trust" /> : <span className="h-3.5 w-3.5 rounded-full border hairline" />}
+                <span>{item}</span>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {run && (
+        <div className="mt-3 grid gap-3 lg:grid-cols-[260px_1fr]">
+          <div className="rounded-md border hairline bg-surface/80 p-3">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Bucket summary</div>
+            <div className="mt-2 grid grid-cols-2 gap-1 text-[11px]">
+              {Object.entries(run.summary.buckets).map(([bucket, count]) => (
+                <div key={bucket} className="flex items-center justify-between rounded bg-surface-muted px-2 py-1">
+                  <span>{bucketLabel(bucket)}</span>
+                  <span className="font-mono">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-md border hairline bg-surface/80 p-3">
+            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Activity className="h-3 w-3" /> Recent classifications</div>
+            <ul className="grid gap-1.5 md:grid-cols-2">
+              {run.results.slice(0, 6).map((item, index) => (
+                <li key={`${item.facility_id}-${item.bucket}-${index}`} className="rounded border hairline bg-background px-2 py-1.5 text-[11px]">
+                  <div className="truncate font-medium">{item.facility_name || item.facility_id}</div>
+                  <div className="mt-0.5 flex items-center justify-between gap-2 text-muted-foreground">
+                    <span>{bucketLabel(item.bucket)}</span>
+                    <Severity severity={item.severity} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReviewSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="rounded-lg border hairline bg-surface p-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_220px]">
+            <div className="space-y-2">
+              <div className="loading-shimmer h-5 w-24 rounded" />
+              <div className="loading-shimmer h-4 w-56 rounded" />
+              <div className="loading-shimmer h-3 w-40 rounded" />
+            </div>
+            <div className="space-y-2">
+              <div className="loading-shimmer h-4 w-2/3 rounded" />
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="loading-shimmer h-16 rounded" />
+                <div className="loading-shimmer h-16 rounded" />
+              </div>
+              <div className="loading-shimmer h-7 w-52 rounded" />
+            </div>
+            <div className="space-y-2">
+              <div className="loading-shimmer h-8 rounded" />
+              <div className="loading-shimmer h-8 rounded" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function bucketLabel(bucket: string): string {
+  return bucket.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function Severity({ severity }: { severity: ReviewTask["severity"] }) {
