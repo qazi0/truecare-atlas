@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { DesertMap } from "@/components/desert-map";
+import { IndiaMap } from "@/components/india-map";
 import type { AggregateRow, AggregateLevel } from "@/lib/types";
 
 export function MapView() {
@@ -35,40 +35,34 @@ export function MapView() {
     fetchAggregates(capability, level);
   }, [capability, level, fetchAggregates]);
 
-  if (loading) {
-    return (
-      <div className="flex flex-1 h-full items-center justify-center">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-2 h-2 rounded-full animate-pulse"
-            style={{ background: "var(--color-trust)" }}
-          />
-          <p className="text-sm text-text-muted">Loading map data…</p>
+  return (
+    <div className="flex flex-col h-full relative">
+      {loading && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-base/60">
+          <div className="flex items-center gap-2">
+            <div
+              className="w-2 h-2 rounded-full animate-pulse"
+              style={{ background: "var(--color-trust)" }}
+            />
+            <p className="text-sm text-text-muted">Loading map data…</p>
+          </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  if (error) {
-    return (
-      <div className="flex flex-1 h-full items-center justify-center">
-        <div className="text-center">
-          <p className="text-sm text-text">Failed to load map data</p>
-          <p className="text-xs font-mono text-alert mt-1">{error}</p>
+      {error && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-10 bg-surface border border-border rounded-lg shadow-md px-4 py-3 text-center">
+          <p className="text-xs text-text">Backend unavailable</p>
+          <p className="text-xs font-mono text-alert mt-0.5">{error}</p>
           <button
             onClick={() => fetchAggregates(capability, level)}
-            className="mt-3 text-xs text-trust underline"
+            className="mt-2 text-xs text-trust underline"
           >
             Retry
           </button>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  return (
-    <div className="flex flex-col h-full">
-      <DesertMap
+      <IndiaMap
         aggregates={aggregates}
         capability={capability}
         level={level}
