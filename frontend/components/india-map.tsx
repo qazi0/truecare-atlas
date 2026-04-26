@@ -98,6 +98,35 @@ function buildFacilityGeoJSON(
   };
 }
 
+function buildCityGeoJSON(pts: FacilityPoint[]): GeoJSON.FeatureCollection {
+  const byCity = new Map<string, { lng: number; lat: number; count: number; city: string; state: string }>();
+  for (const point of pts) {
+    if (!point.city || !point.state) continue;
+    const key = `${point.city}|${point.state}`;
+    const entry = byCity.get(key) ?? { lng: 0, lat: 0, count: 0, city: point.city, state: point.state };
+    entry.lng += point.lng;
+    entry.lat += point.lat;
+    entry.count += 1;
+    byCity.set(key, entry);
+  }
+  return {
+    type: "FeatureCollection",
+    features: Array.from(byCity.values()).map((entry) => ({
+      type: "Feature" as const,
+      geometry: {
+        type: "Point" as const,
+        coordinates: [entry.lng / entry.count, entry.lat / entry.count],
+      },
+      properties: {
+        name: entry.city,
+        state: entry.state,
+        count: entry.count,
+        radius: Math.max(5, Math.min(18, 4 + Math.sqrt(entry.count) * 3)),
+      },
+    })),
+  };
+}
+
 function verificationRatio(verified: number, claimed: number): number {
   return claimed > 0 ? verified / claimed : 0;
 }
@@ -119,7 +148,13 @@ export function IndiaMap({
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
+  const facilitiesRef = useRef<FacilityPoint[]>(facilities);
   const [activeCap, setActiveCap] = useState(capability);
+  const [overlay, setOverlay] = useState<{
+    cities: Array<{ key: string; x: number; y: number; count: number; name: string }>;
+    facilities: Array<{ key: string; x: number; y: number; color: string; id: string; name: string }>;
+    zoom: number;
+  }>({ cities: [], facilities: [], zoom: 4 });
 
   const handleCapChange = (cap: string) => {
     setActiveCap(cap);
@@ -163,6 +198,40 @@ export function IndiaMap({
   );
 
   useEffect(() => {
+    facilitiesRef.current = facilities;
+  }, [facilities]);
+
+  const updateOverlay = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const currentFacilities = facilitiesRef.current;
+    const cityFeatures = buildCityGeoJSON(currentFacilities).features;
+    const cities = cityFeatures.map((feature) => {
+      const coords = (feature.geometry as GeoJSON.Point).coordinates as [number, number];
+      const point = map.project(coords);
+      return {
+        key: `${feature.properties?.name}-${feature.properties?.state}`,
+        x: point.x,
+        y: point.y,
+        count: Number(feature.properties?.count ?? 0),
+        name: String(feature.properties?.name ?? ""),
+      };
+    });
+    const dots = currentFacilities.map((facility) => {
+      const point = map.project([facility.lng, facility.lat]);
+      return {
+        key: facility.facility_id,
+        x: point.x,
+        y: point.y,
+        color: bucketColor(facility.trust_bucket),
+        id: facility.facility_id,
+        name: facility.name,
+      };
+    });
+    setOverlay({ cities, facilities: dots, zoom: map.getZoom() });
+  }, []);
+
+  useEffect(() => {
     if (!mapContainer.current) return;
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) return;
@@ -179,10 +248,21 @@ export function IndiaMap({
     });
     mapRef.current = map;
 
+    const resizeMap = () => {
+      map.resize();
+      updateOverlay();
+    };
+
     map.addControl(
       new mapboxgl.NavigationControl({ showCompass: false }),
       "top-right"
     );
+    map.on("load", resizeMap);
+    map.on("move", updateOverlay);
+    map.on("zoom", updateOverlay);
+    const resizeObserver = new ResizeObserver(resizeMap);
+    resizeObserver.observe(mapContainer.current);
+    window.setTimeout(resizeMap, 0);
 
     map.on("load", () => {
       map.addSource("states", {
@@ -200,9 +280,9 @@ export function IndiaMap({
           // Fade out aggregate circles as user zooms in past 7
           "circle-opacity": [
             "interpolate", ["linear"], ["zoom"],
-            3, 0.75,
-            7, 0.75,
-            9, 0,
+            3, 0.85,
+            6.5, 0.85,
+            8, 0.15,
           ],
           "circle-stroke-color": "#fff",
           "circle-stroke-width": 1.5,
@@ -233,6 +313,53 @@ export function IndiaMap({
         },
       });
 
+      map.addSource("cities", {
+        type: "geojson",
+        data: buildCityGeoJSON(facilities),
+      });
+
+      map.addLayer({
+        id: "city-clusters",
+        type: "circle",
+        source: "cities",
+        paint: {
+          "circle-radius": ["get", "radius"],
+          "circle-color": "#0f5e5a",
+          "circle-opacity": [
+            "interpolate", ["linear"], ["zoom"],
+            3, 0.72,
+            6, 0.72,
+            8, 0,
+          ],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.25,
+        },
+      });
+
+      map.addLayer({
+        id: "city-labels",
+        type: "symbol",
+        source: "cities",
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 10,
+          "text-offset": [0, 1.1],
+          "text-anchor": "top",
+          "text-allow-overlap": false,
+        },
+        paint: {
+          "text-color": "#0f5e5a",
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 1.4,
+          "text-opacity": [
+            "interpolate", ["linear"], ["zoom"],
+            3, 0.9,
+            6, 0.9,
+            8, 0,
+          ],
+        },
+      });
+
       // --- Facility dots layer ---
       map.addSource("facilities", {
         type: "geojson",
@@ -246,17 +373,18 @@ export function IndiaMap({
         paint: {
           "circle-radius": [
             "interpolate", ["linear"], ["zoom"],
-            5, 2,
-            8, 3.5,
+            3, 2.25,
+            6, 3,
+            8, 4,
             12, 6,
           ],
           "circle-color": ["get", "color"],
           // Fade in facility dots starting at zoom 5
           "circle-opacity": [
             "interpolate", ["linear"], ["zoom"],
-            4, 0,
-            5, 0,
-            6, 0.7,
+            3, 0.45,
+            5, 0.55,
+            6, 0.72,
             10, 0.85,
           ],
           "circle-stroke-color": "#fff",
@@ -313,6 +441,28 @@ export function IndiaMap({
       }
     });
 
+    map.on("mouseenter", "city-clusters", (e) => {
+      map.getCanvas().style.cursor = "pointer";
+      const f = e.features?.[0];
+      if (!f || !f.properties) return;
+      const p = f.properties;
+      popup
+        .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+        .setHTML(
+          `<div style="font-family:system-ui;font-size:12px;line-height:1.5;min-width:120px">` +
+            `<strong>${p.name}</strong><br/>` +
+            `<span style="color:#0f5e5a;font-weight:600">${p.count}</span> facilities` +
+            (p.state ? `<br/><span style="color:#6b7280">${p.state}</span>` : "") +
+            `</div>`
+        )
+        .addTo(map);
+    });
+
+    map.on("mouseleave", "city-clusters", () => {
+      map.getCanvas().style.cursor = "";
+      popup.remove();
+    });
+
     // --- Facility dot interactions ---
     map.on("mouseenter", "facility-dots", (e) => {
       map.getCanvas().style.cursor = "pointer";
@@ -351,6 +501,7 @@ export function IndiaMap({
     });
 
     return () => {
+      resizeObserver.disconnect();
       popup.remove();
       map.remove();
       mapRef.current = null;
@@ -378,16 +529,21 @@ export function IndiaMap({
     }
   }, [aggregates, buildGeoJSON]);
 
-  // Update facility points when data arrives
+  // Update facility and city points when data arrives
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || facilities.length === 0) return;
+    if (!map) return;
 
     const updateFacilities = () => {
       const source = map.getSource("facilities") as mapboxgl.GeoJSONSource | undefined;
       if (source) {
         source.setData(buildFacilityGeoJSON(facilities));
       }
+      const citySource = map.getSource("cities") as mapboxgl.GeoJSONSource | undefined;
+      if (citySource) {
+        citySource.setData(buildCityGeoJSON(facilities));
+      }
+      updateOverlay();
     };
 
     if (map.isStyleLoaded()) {
@@ -395,7 +551,7 @@ export function IndiaMap({
     } else {
       map.once("load", updateFacilities);
     }
-  }, [facilities]);
+  }, [facilities, updateOverlay]);
 
   return (
     <div className="flex flex-col h-full">
@@ -438,7 +594,35 @@ export function IndiaMap({
       </div>
 
       {/* Map */}
-      <div ref={mapContainer} className="flex-1 min-h-0" />
+      <div className="relative flex-1 min-h-[420px] overflow-hidden bg-map-water">
+        <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
+        <div className="pointer-events-none absolute inset-0 z-10">
+          {overlay.zoom < 7.5 && overlay.cities.map((city) => (
+            <div
+              key={city.key}
+              className="absolute -translate-x-1/2 -translate-y-1/2"
+              style={{ left: city.x, top: city.y }}
+              title={`${city.name}: ${city.count} facilities`}
+            >
+              <span className="block rounded-full border border-white bg-primary shadow-sm" style={{ width: Math.max(9, Math.min(24, 8 + city.count * 2)), height: Math.max(9, Math.min(24, 8 + city.count * 2)) }} />
+              <span className="absolute left-1/2 top-full mt-0.5 -translate-x-1/2 whitespace-nowrap rounded bg-white/85 px-1 font-mono text-[9px] text-primary shadow-sm">
+                {city.name}
+              </span>
+            </div>
+          ))}
+          {overlay.facilities.map((facility) => (
+            <button
+              key={facility.key}
+              type="button"
+              aria-label={facility.name}
+              title={facility.name}
+              onClick={() => window.open(`/facility/${facility.id}`, "_blank")}
+              className="pointer-events-auto absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white shadow-sm transition-transform hover:scale-150"
+              style={{ left: facility.x, top: facility.y, background: facility.color }}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

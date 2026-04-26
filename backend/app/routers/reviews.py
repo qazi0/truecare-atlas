@@ -7,6 +7,7 @@ from app.services.review_queue import (
     create_review_task,
     delete_review_task,
     list_review_tasks,
+    persist_generated_review_task,
     update_review_task,
 )
 
@@ -29,6 +30,8 @@ def post_review(payload: ReviewTaskCreate) -> ReviewTask:
 @router.patch("/reviews/{task_id}", response_model=ReviewTask)
 def patch_review(task_id: str, payload: ReviewTaskUpdate) -> ReviewTask:
     task = update_review_task(task_id, payload)
+    if task is None and task_id.startswith("gen_"):
+        task = persist_generated_review_task(task_id, payload)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Review task not found: {task_id}")
     return task

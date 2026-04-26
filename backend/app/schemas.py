@@ -94,6 +94,9 @@ class FacilityHit(BaseModel):
     trust_score: int | None = None
     distance_km: float | None = None
     capabilities: FacilityCapabilities | None = None
+    flag_count: int | None = None
+    has_contradiction: bool | None = None
+    trust_status: str | None = None
 
 
 class FacilityFull(FacilityHit):
@@ -213,6 +216,28 @@ class AggregateRowWithCI(AggregateRow):
     ci_lower: float | None = None
     ci_upper: float | None = None
     verification_rate: float | None = None
+
+
+class RegionSummary(BaseModel):
+    region: str
+    capability: str
+    claimed_count: int
+    verified_count: int
+    needs_review_count: int
+    contradiction_count: int
+    ci_lower: float | None = None
+    ci_upper: float | None = None
+    verification_rate: float | None = None
+    top_facilities: list[FacilityHit] = []
+
+
+class RecentTrace(BaseModel):
+    id: str
+    query: str | None = None
+    status: str | None = None
+    duration_ms: int | None = None
+    started_at: str | None = None
+    steps: int | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,16 @@
-"""GET /api/traces/{run_id} — proxies MLflow trace JSON."""
+"""MLflow trace endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
-from app.services.mlflow_tracing import fetch_trace
+from app.schemas import RecentTrace
+from app.services.mlflow_tracing import fetch_trace, recent_traces
 
 router = APIRouter(tags=["traces"])
+
+
+@router.get("/traces/recent", response_model=list[RecentTrace])
+def get_recent_traces(limit: int = Query(default=10, ge=1, le=50)) -> list[RecentTrace]:
+    return [RecentTrace.model_validate(item) for item in recent_traces(limit=limit)]
 
 
 @router.get("/traces/{run_id}")

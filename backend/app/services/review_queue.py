@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.schemas import ReviewNote, ReviewStatus, ReviewTask, ReviewTaskCreate, ReviewTaskUpdate
+from app.services.databricks_sql import query_generated_review_candidates
 from app.settings import settings
 
 _LOCK = threading.Lock()
@@ -42,6 +43,23 @@ def list_review_tasks(
 ) -> list[ReviewTask]:
     with _LOCK:
         tasks = _read_all()
+    persisted_ids = {t.id for t in tasks}
+    try:
+        generated = [
+            ReviewTask(
+                **item,
+                status=ReviewStatus.PENDING,
+                owner=None,
+                notes=[],
+                created_at=_now(),
+                updated_at=_now(),
+            )
+            for item in query_generated_review_candidates()
+            if item["id"] not in persisted_ids
+        ]
+        tasks = tasks + generated
+    except Exception:
+        pass
     if status:
         tasks = [t for t in tasks if t.status == status]
     if facility_id:
@@ -90,6 +108,25 @@ def update_review_task(task_id: str, payload: ReviewTaskUpdate) -> ReviewTask | 
             _write_all(tasks)
             return updated
     return None
+
+
+def persist_generated_review_task(task_id: str, payload: ReviewTaskUpdate) -> ReviewTask | None:
+    base = next((task for task in list_review_tasks() if task.id == task_id), None)
+    if base is None:
+        return None
+    updated = base.model_copy(deep=True)
+    if payload.status is not None:
+        updated.status = payload.status
+    if payload.owner is not None:
+        updated.owner = payload.owner
+    if payload.note:
+        updated.notes.append(ReviewNote(text=payload.note, created_at=_now()))
+    updated.updated_at = _now()
+    with _LOCK:
+        tasks = [t for t in _read_all() if t.id != task_id]
+        tasks.append(updated)
+        _write_all(tasks)
+    return updated
 
 
 def delete_review_task(task_id: str) -> bool:

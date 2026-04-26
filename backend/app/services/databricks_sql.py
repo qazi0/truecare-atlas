@@ -14,12 +14,15 @@ from app.schemas import (
     AggregateRow,
     AggregateRowWithCI,
     Capability,
+    Confidence,
     FacilityCapabilities,
     FacilityFilters,
     FacilityFull,
     FacilityHit,
     PlaceResolution,
+    RegionSummary,
     Severity,
+    SourceField,
     TrustFlag,
     TrustReport,
 )
@@ -104,17 +107,53 @@ def _row_to_capabilities(row: dict) -> FacilityCapabilities:
     for col in _CAP_COLS:
         detail_json = row.get(f"{col}_detail")
         evidence_quote: str | None = None
+        source_field: SourceField | None = None
+        confidence = Confidence.LOW
         if detail_json:
             try:
                 detail = json.loads(detail_json) if isinstance(detail_json, str) else detail_json
-                evidence_quote = detail.get("evidence_quote") if isinstance(detail, dict) else None
+                if isinstance(detail, dict):
+                    evidence_quote = detail.get("evidence_quote")
+                    raw_source = detail.get("source_field") or detail.get("source")
+                    if isinstance(raw_source, str):
+                        normalized = raw_source.lower().replace(" ", "_")
+                        if normalized in SourceField._value2member_map_:
+                            source_field = SourceField(normalized)
+                        elif normalized in {"services", "services_offered", "department_list", "infrastructure"}:
+                            source_field = SourceField.CAPABILITY
+                    raw_conf = detail.get("confidence")
+                    if isinstance(raw_conf, str) and raw_conf.lower() in Confidence._value2member_map_:
+                        confidence = Confidence(raw_conf.lower())
+                    elif isinstance(raw_conf, (int, float)):
+                        confidence = (
+                            Confidence.HIGH if raw_conf >= 0.8
+                            else Confidence.MEDIUM if raw_conf >= 0.5
+                            else Confidence.LOW
+                        )
             except (json.JSONDecodeError, AttributeError):
                 pass
-        caps[col] = Capability(value=bool(row.get(col)), evidence_quote=evidence_quote)
+        caps[col] = Capability(
+            value=bool(row.get(col)),
+            evidence_quote=evidence_quote,
+            source_field=source_field,
+            confidence=confidence,
+        )
     return FacilityCapabilities(
         capabilities_caption=_clean_str(row.get("capabilities_caption")) or "",
         **caps,
     )
+
+
+def _trust_status(row: dict) -> str:
+    if row.get("r6_modality_contradiction"):
+        return "Contradiction"
+    flag_count = int(row.get("flag_count") or 0)
+    score = row.get("trust_score")
+    if flag_count > 0:
+        return "Needs review"
+    if score is not None and int(score) < 60:
+        return "Evidence weak"
+    return "Verified"
 
 
 def _row_to_facility_hit(row: dict, distance_km: float | None = None) -> FacilityHit:
@@ -130,6 +169,9 @@ def _row_to_facility_hit(row: dict, distance_km: float | None = None) -> Facilit
         trust_score=row.get("trust_score"),
         distance_km=distance_km,
         capabilities=_row_to_capabilities(row),
+        flag_count=int(row.get("flag_count") or 0),
+        has_contradiction=bool(row.get("r6_modality_contradiction")),
+        trust_status=_trust_status(row),
     )
 
 
@@ -591,13 +633,35 @@ def query_facilities_for_export(facility_ids: list[str]) -> list[dict]:
     return _execute(sql, facility_ids)
 
 
-def query_map_facilities() -> list[dict]:
+def query_map_facilities(
+    capability: str | None = None,
+    verified_only: bool = False,
+    show_review_needed: bool = True,
+) -> list[dict]:
     """Lightweight facility list for map markers — only id, name, lat/lng, trust, type."""
-    sql = """
+    normalized = None
+    if capability:
+        normalized = _CAP_ALIASES.get(capability.lower().replace(" ", "_"), capability)
+        if normalized not in _CAP_COLS:
+            normalized = None
+    clauses = ["latitude IS NOT NULL", "longitude IS NOT NULL"]
+    if normalized:
+        clauses.append(f"{normalized} = TRUE")
+    if verified_only:
+        clauses.append("trust_score >= 80")
+        clauses.append("COALESCE(flag_count, 0) = 0")
+        clauses.append("COALESCE(r6_modality_contradiction, FALSE) = FALSE")
+    if not show_review_needed:
+        clauses.append("COALESCE(flag_count, 0) = 0")
+        clauses.append("trust_score >= 60")
+    sql = f"""
         SELECT facility_id, name, latitude, longitude, trust_score,
-               trust_score_bucket, facility_type_id, state_canon, city
+               trust_score_bucket, facility_type_id, state_canon, city,
+               flag_count, r6_modality_contradiction
         FROM workspace.default.gold_facility_trust
-        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        WHERE {" AND ".join(clauses)}
+        ORDER BY trust_score DESC
+        LIMIT 10000
     """
     rows = _execute(sql, [])
     return [
@@ -611,10 +675,95 @@ def query_map_facilities() -> list[dict]:
             "type": r.get("facility_type_id"),
             "state": _clean_str(r.get("state_canon")),
             "city": _clean_str(r.get("city")),
+            "flag_count": int(r.get("flag_count") or 0),
+            "has_contradiction": bool(r.get("r6_modality_contradiction")),
+            "trust_status": _trust_status(r),
         }
         for r in rows
         if r.get("latitude") is not None and r.get("longitude") is not None
     ]
+
+
+def query_region_summary(region: str, capability: str = "has_nicu") -> RegionSummary:
+    """Capability summary for one state/region plus top matching facilities."""
+    normalized = _CAP_ALIASES.get(capability.lower().replace(" ", "_"), capability)
+    if normalized not in _CAP_COLS:
+        normalized = "has_nicu"
+    rows = _execute(
+        f"""
+        SELECT
+            COUNT(*) AS claimed_count,
+            SUM(CASE WHEN trust_score >= 80 AND COALESCE(flag_count, 0) = 0 THEN 1 ELSE 0 END) AS verified_count,
+            SUM(CASE WHEN COALESCE(flag_count, 0) > 0 OR trust_score < 80 THEN 1 ELSE 0 END) AS needs_review_count,
+            SUM(CASE WHEN COALESCE(r6_modality_contradiction, FALSE) THEN 1 ELSE 0 END) AS contradiction_count
+        FROM workspace.default.gold_facility_trust
+        WHERE state_canon = ? AND {normalized} = TRUE
+        """,
+        [region],
+    )
+    stats = rows[0] if rows else {}
+    claimed = int(stats.get("claimed_count") or 0)
+    verified = int(stats.get("verified_count") or 0)
+    ci_low, ci_high = wilson_ci(n=claimed, k=verified)
+    top_rows = _execute(
+        f"""
+        SELECT *
+        FROM workspace.default.gold_facility_trust
+        WHERE state_canon = ? AND {normalized} = TRUE
+        ORDER BY trust_score DESC, COALESCE(flag_count, 0) ASC
+        LIMIT 5
+        """,
+        [region],
+    )
+    return RegionSummary(
+        region=region,
+        capability=normalized,
+        claimed_count=claimed,
+        verified_count=verified,
+        needs_review_count=int(stats.get("needs_review_count") or 0),
+        contradiction_count=int(stats.get("contradiction_count") or 0),
+        ci_lower=ci_low,
+        ci_upper=ci_high,
+        verification_rate=round(verified / claimed, 4) if claimed else 0.0,
+        top_facilities=[_row_to_facility_hit(r) for r in top_rows],
+    )
+
+
+def query_generated_review_candidates(limit: int = 50) -> list[dict]:
+    """Deterministic review candidates derived from trust flags."""
+    sql = f"""
+        SELECT *
+        FROM workspace.default.gold_facility_trust
+        WHERE COALESCE(flag_count, 0) > 0 OR COALESCE(r6_modality_contradiction, FALSE)
+        ORDER BY COALESCE(r6_modality_contradiction, FALSE) DESC, flag_count DESC, trust_score ASC
+        LIMIT {int(limit)}
+    """
+    rows = _execute(sql, [])
+    candidates: list[dict] = []
+    for row in rows:
+        report = _row_to_trust_report(row)
+        flags = report.flags or [
+            TrustFlag(
+                rule_id="review_needed",
+                severity=Severity.YELLOW,
+                label="Facility has trust flags requiring review",
+                evidence_quotes=[],
+            )
+        ]
+        for flag in flags[:2]:
+            candidates.append({
+                "id": f"gen_{row['facility_id']}_{flag.rule_id}",
+                "facility_id": row["facility_id"],
+                "facility_name": _clean_str(row.get("name")),
+                "capability": None,
+                "claim": flag.label,
+                "reason": flag.label,
+                "severity": flag.severity,
+                "evidence_for": flag.evidence_quotes[:1],
+                "evidence_against": flag.evidence_quotes[1:] or [flag.label],
+                "source": "generated",
+            })
+    return candidates
 
 
 def query_data_health_metrics() -> dict:

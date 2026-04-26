@@ -66,6 +66,9 @@ export interface FacilityHit {
   trust_score: number | null;
   distance_km: number | null;
   capabilities: FacilityCapabilities | null;
+  flag_count?: number | null;
+  has_contradiction?: boolean | null;
+  trust_status?: string | null;
 }
 
 export interface FacilityFull extends FacilityHit {
@@ -93,6 +96,19 @@ export interface AggregateRowWithCI extends AggregateRow {
   ci_lower: number | null;
   ci_upper: number | null;
   verification_rate: number | null;
+}
+
+export interface RegionSummary {
+  region: string;
+  capability: string;
+  claimed_count: number;
+  verified_count: number;
+  needs_review_count: number;
+  contradiction_count: number;
+  ci_lower: number | null;
+  ci_upper: number | null;
+  verification_rate: number | null;
+  top_facilities: FacilityHit[];
 }
 
 export interface ValidationFinding {
@@ -129,6 +145,42 @@ export interface HealthCheck {
   message?: string;
 }
 
+export interface DataHealthResponse {
+  status: string;
+  generated_at?: string;
+  checks: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  pipeline: Array<Record<string, unknown>>;
+  governance: string[];
+}
+
+export interface ReviewTask {
+  id: string;
+  facility_id: string;
+  facility_name: string | null;
+  capability: string | null;
+  claim: string | null;
+  reason: string;
+  severity: Severity;
+  evidence_for: string[];
+  evidence_against: string[];
+  source: string;
+  status: "pending" | "phone_verification" | "accepted" | "rejected";
+  owner: string | null;
+  notes: { text: string; created_at: string }[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecentTrace {
+  id: string;
+  query: string | null;
+  status: string | null;
+  duration_ms: number | null;
+  started_at: string | null;
+  steps: number | null;
+}
+
 export interface SSEEvent {
   type: SSEEventType;
   payload: Record<string, unknown>;
@@ -144,6 +196,9 @@ export interface FacilityPoint {
   type: string | null;
   state: string | null;
   city: string | null;
+  flag_count?: number | null;
+  has_contradiction?: boolean | null;
+  trust_status?: string | null;
 }
 
 // Frontend-only derived state
