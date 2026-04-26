@@ -10,40 +10,42 @@ interface EvidenceQuoteProps {
   index: number;
 }
 
-function severityBadgeClass(severity: string): string {
-  if (severity === "green")
-    return "bg-trust/10 text-trust border-trust/30";
-  if (severity === "yellow")
-    return "bg-caution/10 text-caution border-caution/30";
-  return "bg-alert/10 text-alert border-alert/30";
-}
+const SEVERITY_STYLES: Record<string, string> = {
+  green: "border-trust/30 text-trust bg-trust/5",
+  yellow: "border-caution/30 text-caution bg-caution/5",
+  red: "border-alert/30 text-alert bg-alert/5",
+};
 
-export function EvidenceQuote({ flag, index: _index }: EvidenceQuoteProps) {
+export function EvidenceQuote({ flag }: EvidenceQuoteProps) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start gap-2 flex-wrap">
         <Badge
           variant="outline"
-          className={`text-xs font-mono ${severityBadgeClass(flag.severity)}`}
+          className={`text-[10px] font-mono shrink-0 ${SEVERITY_STYLES[flag.severity] ?? ""}`}
         >
           {flag.rule_id}
         </Badge>
-        <span className="text-xs text-text-muted">{flag.label}</span>
+        <span className="text-xs text-text-muted leading-snug break-words min-w-0">
+          {flag.label}
+        </span>
       </div>
-      <motion.ul
-        variants={evidenceStagger}
-        initial="hidden"
-        animate="visible"
-        className="flex flex-col gap-1"
-      >
-        {flag.evidence_quotes.map((quote, qi) => (
-          <motion.li key={qi} variants={evidenceItem}>
-            <p className="text-xs italic text-text-muted pl-2 border-l-2 border-border">
-              &ldquo;{quote}&rdquo;
-            </p>
-          </motion.li>
-        ))}
-      </motion.ul>
+      {flag.evidence_quotes.length > 0 && (
+        <motion.ul
+          variants={evidenceStagger}
+          initial="hidden"
+          animate="visible"
+          className="flex flex-col gap-0.5 mt-0.5"
+        >
+          {flag.evidence_quotes.map((quote, qi) => (
+            <motion.li key={qi} variants={evidenceItem}>
+              <p className="text-xs italic text-text-muted pl-2 border-l-2 border-border leading-relaxed break-words">
+                &ldquo;{quote}&rdquo;
+              </p>
+            </motion.li>
+          ))}
+        </motion.ul>
+      )}
     </div>
   );
 }

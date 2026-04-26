@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { ReasoningTrace } from "./reasoning-trace";
 import { FacilityCard } from "./facility-card";
 import { TrustPanel } from "./trust-panel";
@@ -13,14 +12,12 @@ import { ErrorBanner } from "./error-banner";
 import { useStream } from "@/hooks/use-stream";
 import type { FacilityHit, FacilityFull } from "@/lib/types";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-
 const DEMO_QUERIES = [
-  "NICU Bihar",
+  "hospitals in Bihar",
   "oncology Maharashtra",
-  "dialysis Rajasthan",
-  "maternity Tamil Nadu",
+  "dialysis Tamil Nadu",
   "Agasthiyar",
+  "maternity Kerala",
 ];
 
 export function SearchConsole() {
@@ -34,27 +31,38 @@ export function SearchConsole() {
   const [quickSearching, setQuickSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = useCallback(
-    async (q: string) => {
+  const handleSubmit = useCallback(async (q: string) => {
+    if (!q.trim()) return;
+    setLastQuery(q);
+    setSelectedId(null);
+    setSelectedFacility(null);
+    setQuickResults([]);
+    setQuickSearching(true);
+    try {
+      const resp = await fetch(
+        `/api/search-quick?q=${encodeURIComponent(q)}&k=20`
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        setQuickResults(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      // fall through
+    } finally {
+      setQuickSearching(false);
+    }
+  }, []);
+
+  const handleAgentSearch = useCallback(
+    (q: string) => {
       if (!q.trim()) return;
       setLastQuery(q);
       setSelectedId(null);
       setSelectedFacility(null);
       setQuickResults([]);
-      setQuickSearching(true);
-      try {
-        const resp = await fetch(`${BACKEND_URL}/api/search-quick?q=${encodeURIComponent(q)}&k=20`);
-        if (resp.ok) {
-          const data = await resp.json();
-          setQuickResults(Array.isArray(data) ? data : []);
-        }
-      } catch {
-        // fall through
-      } finally {
-        setQuickSearching(false);
-      }
+      submit(q);
     },
-    []
+    [submit]
   );
 
   const handleSelect = useCallback(async (facilityId: string) => {
@@ -62,13 +70,15 @@ export function SearchConsole() {
     setIsFetchingFacility(true);
     setSelectedFacility(null);
     try {
-      const resp = await fetch(`/api/facility?id=${encodeURIComponent(facilityId)}`);
+      const resp = await fetch(
+        `/api/facility?id=${encodeURIComponent(facilityId)}`
+      );
       if (resp.ok) {
         const data = await resp.json();
         setSelectedFacility(data as FacilityFull);
       }
     } catch {
-      // fall through — panel shows basic data from FacilityHit
+      // panel shows basic data from FacilityHit
     } finally {
       setIsFetchingFacility(false);
     }
@@ -81,71 +91,96 @@ export function SearchConsole() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") handleSubmit(query);
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSubmit(query);
+    }
+  };
+
+  const handleClear = () => {
+    reset();
+    setQuickResults([]);
+    setSelectedFacility(null);
+    setSelectedId(null);
+    setQuery("");
   };
 
   const trustReport = selectedFacility?.trust_report ?? null;
+  const hasResults =
+    quickResults.length > 0 || state.facilities.length > 0;
+  const isIdle =
+    !state.is_streaming &&
+    state.steps.length === 0 &&
+    !hasResults &&
+    !quickSearching;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Top search bar */}
-      <header className="flex items-center gap-3 border-b border-border px-4 py-3 shrink-0">
-        <h1 className="text-base font-semibold tracking-tight shrink-0 hidden sm:block">
-          TrustMap India
-        </h1>
+      {/* Search bar */}
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 shrink-0">
         <div className="flex-1 flex gap-2">
           <Input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Find hospitals in Bihar with NICU + blood bank…"
-            className="bg-surface"
+            placeholder="Search facilities by name, city, state, or capability…"
+            className="bg-surface text-sm"
             style={{ color: "var(--color-text)" }}
           />
           <Button
             onClick={() => handleSubmit(query)}
             disabled={quickSearching || !query.trim()}
             size="sm"
+            className="shrink-0"
           >
             {quickSearching ? "Searching…" : "Search"}
           </Button>
-          {(quickResults.length > 0 || state.facilities.length > 0) && (
+          {query.trim() && (
             <Button
-              onClick={() => { reset(); setQuickResults([]); setSelectedFacility(null); }}
+              onClick={() => handleAgentSearch(query)}
+              disabled={state.is_streaming || !query.trim()}
+              variant="outline"
+              size="sm"
+              className="shrink-0 text-xs"
+            >
+              {state.is_streaming ? "Reasoning…" : "Deep Search"}
+            </Button>
+          )}
+          {hasResults && (
+            <Button
+              onClick={handleClear}
               variant="ghost"
               size="sm"
-              className="text-text-muted"
+              className="text-text-muted shrink-0"
             >
               Clear
             </Button>
           )}
         </div>
-      </header>
+      </div>
 
-      {/* Demo suggestions — only when idle and empty */}
+      {/* Demo suggestions */}
       <AnimatePresence>
-        {!state.is_streaming &&
-          state.steps.length === 0 &&
-          state.facilities.length === 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              className="flex flex-wrap gap-2 px-4 py-2 border-b border-border shrink-0"
-            >
-              <span className="text-xs text-text-muted self-center">Try:</span>
-              {DEMO_QUERIES.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => handleDemoQuery(q)}
-                  className="text-xs px-2.5 py-1 rounded-full border border-border text-text-muted hover:border-trust hover:text-trust transition-colors"
-                >
-                  {q}
-                </button>
-              ))}
-            </motion.div>
-          )}
+        {isIdle && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            className="flex flex-wrap gap-2 px-4 py-2 border-b border-border shrink-0"
+          >
+            <span className="text-xs text-text-muted self-center">Try:</span>
+            {DEMO_QUERIES.map((q) => (
+              <button
+                key={q}
+                onClick={() => handleDemoQuery(q)}
+                className="text-xs px-2.5 py-1 rounded-full border border-border text-text-muted hover:border-trust hover:text-trust transition-colors"
+              >
+                {q}
+              </button>
+            ))}
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Error banner */}
@@ -163,19 +198,26 @@ export function SearchConsole() {
 
       {/* Three-column layout */}
       <div className="flex flex-1 min-h-0">
-        {/* Left: Reasoning trace — 300px on desktop, hidden on mobile when no steps */}
-        <div
-          className="hidden md:flex flex-col border-r border-border shrink-0"
-          style={{ width: 300 }}
-        >
-          <ReasoningTrace steps={state.steps} isStreaming={state.is_streaming} />
-        </div>
+        {/* Left: Reasoning trace */}
+        {(state.steps.length > 0 || state.is_streaming) && (
+          <div
+            className="hidden md:flex flex-col border-r border-border shrink-0"
+            style={{ width: 280 }}
+          >
+            <ReasoningTrace
+              steps={state.steps}
+              isStreaming={state.is_streaming}
+            />
+          </div>
+        )}
 
         {/* Center: Results */}
         <div className="flex flex-col flex-1 min-w-0">
           {state.summary && (
-            <div className="px-4 py-2 border-b border-border shrink-0">
-              <p className="text-xs text-text-muted leading-relaxed">{state.summary}</p>
+            <div className="px-4 py-2.5 border-b border-border shrink-0 bg-surface/50">
+              <p className="text-xs text-text leading-relaxed">
+                {state.summary}
+              </p>
               {state.trace_id && (
                 <p className="text-xs font-mono text-text-muted mt-0.5">
                   trace: {state.trace_id}
@@ -185,72 +227,77 @@ export function SearchConsole() {
           )}
 
           <ScrollArea className="flex-1">
-            <div className="flex flex-col gap-2 p-3">
-              {quickResults.length === 0 && !quickSearching && state.facilities.length === 0 && !state.is_streaming && (
-                <div className="flex items-center justify-center py-16">
+            <div className="flex flex-col gap-1.5 p-3">
+              {isIdle && (
+                <div className="flex flex-col items-center justify-center py-20 gap-2">
                   <p className="text-sm text-text-muted">
                     Search by facility name, city, state, or capability
+                  </p>
+                  <p className="text-xs text-text-muted/60">
+                    Use &ldquo;Deep Search&rdquo; for AI-powered multi-step reasoning
                   </p>
                 </div>
               )}
               {quickSearching && (
-                <div className="flex items-center gap-2 py-4 px-1">
+                <div className="flex items-center gap-2 py-6 px-1 justify-center">
                   <motion.div
                     className="w-2 h-2 rounded-full"
                     style={{ background: "var(--color-trust)" }}
-                    animate={{ scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }}
+                    animate={{
+                      scale: [1, 1.4, 1],
+                      opacity: [1, 0.5, 1],
+                    }}
                     transition={{ duration: 0.8, repeat: Infinity }}
                   />
-                  <p className="text-xs text-text-muted">Searching Databricks…</p>
+                  <p className="text-xs text-text-muted">
+                    Searching facilities…
+                  </p>
                 </div>
               )}
-              {quickResults.map((facility) => (
-                <FacilityCard
+              {quickResults.map((facility, i) => (
+                <motion.div
                   key={facility.facility_id}
-                  facility={facility}
-                  isSelected={selectedId === facility.facility_id}
-                  onSelect={handleSelect}
-                />
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03, duration: 0.15 }}
+                >
+                  <FacilityCard
+                    facility={facility}
+                    isSelected={selectedId === facility.facility_id}
+                    onSelect={handleSelect}
+                  />
+                </motion.div>
               ))}
-              {state.facilities.map((facility) => (
-                <FacilityCard
+              {state.facilities.map((facility, i) => (
+                <motion.div
                   key={facility.facility_id}
-                  facility={facility}
-                  isSelected={selectedId === facility.facility_id}
-                  onSelect={handleSelect}
-                />
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03, duration: 0.15 }}
+                >
+                  <FacilityCard
+                    facility={facility}
+                    isSelected={selectedId === facility.facility_id}
+                    onSelect={handleSelect}
+                  />
+                </motion.div>
               ))}
             </div>
           </ScrollArea>
         </div>
 
-        {/* Right: Trust panel — 380px on desktop */}
+        {/* Right: Trust panel */}
         <div
           className="hidden lg:flex flex-col border-l border-border shrink-0"
-          style={{ width: 380 }}
+          style={{ width: 360 }}
         >
-          <div className="px-3 py-2 border-b border-border shrink-0">
-            <p className="text-xs font-medium text-text">Trust Analysis</p>
-          </div>
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <TrustPanel
-              facility={selectedFacility}
-              report={trustReport}
-              isLoading={isFetchingFacility}
-            />
-          </div>
+          <TrustPanel
+            facility={selectedFacility}
+            report={trustReport}
+            isLoading={isFetchingFacility}
+          />
         </div>
       </div>
-
-      {/* Mobile: reasoning trace drawer hint */}
-      {state.steps.length > 0 && (
-        <div className="md:hidden border-t border-border px-4 py-2 shrink-0">
-          <p className="text-xs text-text-muted">
-            {state.steps.length} reasoning step{state.steps.length !== 1 ? "s" : ""}
-            {state.is_streaming ? " (live)" : ""}
-          </p>
-        </div>
-      )}
     </div>
   );
 }

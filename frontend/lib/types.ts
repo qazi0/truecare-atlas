@@ -89,6 +89,46 @@ export interface AggregateRow {
   per_100k: number | null;
 }
 
+export interface AggregateRowWithCI extends AggregateRow {
+  ci_lower: number | null;
+  ci_upper: number | null;
+  verification_rate: number | null;
+}
+
+export interface ValidationFinding {
+  capability: string;
+  claimed: boolean;
+  plausible: boolean;
+  reasoning: string;
+  evidence_for: string[];
+  evidence_against: string[];
+}
+
+export interface ValidatorResult {
+  facility_id: string;
+  facility_name: string;
+  overall_assessment: string;
+  findings: ValidationFinding[];
+  medical_standards_checked: string[];
+  recommendation: string;
+}
+
+export interface ExportRequest {
+  facility_ids: string[];
+  format: "csv" | "json";
+  include_trust_audit: boolean;
+  include_capabilities: boolean;
+}
+
+export interface HealthCheck {
+  status: "ok" | "degraded" | "error";
+  checks?: {
+    sql: { ok: boolean; user?: string; error?: string };
+    vector_search: { ok: boolean; indexed_rows?: number; error?: string };
+  };
+  message?: string;
+}
+
 export interface SSEEvent {
   type: SSEEventType;
   payload: Record<string, unknown>;
