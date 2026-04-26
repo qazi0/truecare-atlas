@@ -3,7 +3,6 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { Badge } from "@/components/ui/badge";
 import type { AggregateRow, AggregateLevel, FacilityPoint } from "@/lib/types";
 
 interface IndiaMapProps {
@@ -12,7 +11,6 @@ interface IndiaMapProps {
   capability: string;
   level: AggregateLevel;
   onRegionClick: (name: string, level: AggregateLevel) => void;
-  onCapabilityChange?: (cap: string) => void;
 }
 
 const CAPABILITY_OPTIONS = [
@@ -28,8 +26,19 @@ const CAPABILITY_OPTIONS = [
   { key: "has_cardiac_cath_lab", label: "Cath Lab" },
 ];
 
-const FACILITY_DOT_MIN_ZOOM = 6.6;
 const CITY_DOT_MAX_ZOOM = 7.2;
+
+interface SelectedFacilityCard {
+  facility_id: string;
+  name: string;
+  city: string;
+  state: string;
+  type: string;
+  trust_score: number | null;
+  color: string;
+  coordinates: [number, number];
+  point: { x: number; y: number };
+}
 
 const STATE_CENTROIDS: Record<string, [number, number]> = {
   "Andhra Pradesh": [79.74, 15.91],
@@ -146,23 +155,18 @@ export function IndiaMap({
   capability,
   level,
   onRegionClick,
-  onCapabilityChange,
 }: IndiaMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
   const facilitiesRef = useRef<FacilityPoint[]>(facilities);
-  const [activeCap, setActiveCap] = useState(capability);
+  const capabilityRef = useRef(capability);
+  const activeFacilityPopupRef = useRef<string | null>(null);
+  const [selectedFacility, setSelectedFacility] = useState<SelectedFacilityCard | null>(null);
   const [overlay, setOverlay] = useState<{
     cities: Array<{ key: string; x: number; y: number; count: number; name: string }>;
-    facilities: Array<{ key: string; x: number; y: number; color: string; id: string; name: string }>;
     zoom: number;
-  }>({ cities: [], facilities: [], zoom: 4 });
-
-  const handleCapChange = (cap: string) => {
-    setActiveCap(cap);
-    onCapabilityChange?.(cap);
-  };
+  }>({ cities: [], zoom: 4 });
 
   const totalClaimed = aggregates.reduce((s, r) => s + r.claimed_count, 0);
   const totalVerified = aggregates.reduce((s, r) => s + r.verified_count, 0);
@@ -204,6 +208,10 @@ export function IndiaMap({
     facilitiesRef.current = facilities;
   }, [facilities]);
 
+  useEffect(() => {
+    capabilityRef.current = capability;
+  }, [capability]);
+
   const updateOverlay = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -220,18 +228,7 @@ export function IndiaMap({
         name: String(feature.properties?.name ?? ""),
       };
     });
-    const dots = currentFacilities.map((facility) => {
-      const point = map.project([facility.lng, facility.lat]);
-      return {
-        key: facility.facility_id,
-        x: point.x,
-        y: point.y,
-        color: bucketColor(facility.trust_bucket),
-        id: facility.facility_id,
-        name: facility.name,
-      };
-    });
-    setOverlay({ cities, facilities: dots, zoom: map.getZoom() });
+    setOverlay({ cities, zoom: map.getZoom() });
   }, []);
 
   useEffect(() => {
@@ -280,12 +277,13 @@ export function IndiaMap({
         paint: {
           "circle-radius": ["get", "radius"],
           "circle-color": ["get", "color"],
-          // Fade out aggregate circles as user zooms in past 7
+          // Keep aggregate context visible while individual facility dots take over.
           "circle-opacity": [
             "interpolate", ["linear"], ["zoom"],
             3, 0.85,
             6.5, 0.85,
-            8, 0.15,
+            8, 0.45,
+            10, 0.22,
           ],
           "circle-stroke-color": "#fff",
           "circle-stroke-width": 1.5,
@@ -332,7 +330,8 @@ export function IndiaMap({
             "interpolate", ["linear"], ["zoom"],
             3, 0.72,
             6, 0.72,
-            8, 0,
+            8, 0.55,
+            10, 0.25,
           ],
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 1.25,
@@ -376,27 +375,42 @@ export function IndiaMap({
         paint: {
           "circle-radius": [
             "interpolate", ["linear"], ["zoom"],
-            3, 2.25,
-            6, 3,
-            8, 4,
+            3, 3,
+            6, 3.5,
+            8, 4.5,
             12, 6,
           ],
           "circle-color": ["get", "color"],
-          // Keep individual dots out of the national view; they become useful only at regional zoom.
+          // Facility dots should stay pinned and visible across zoom levels.
           "circle-opacity": [
             "interpolate", ["linear"], ["zoom"],
-            5.8, 0,
-            6.4, 0,
-            6.9, 0.72,
-            10, 0.85,
+            3, 0.82,
+            8, 0.86,
+            14, 0.92,
           ],
           "circle-stroke-color": "#fff",
           "circle-stroke-width": [
             "interpolate", ["linear"], ["zoom"],
-            6.4, 0,
+            3, 0.5,
             8, 0.5,
             12, 1,
           ],
+        },
+      });
+
+      map.addLayer({
+        id: "facility-hit-targets",
+        type: "circle",
+        source: "facilities",
+        paint: {
+          "circle-radius": [
+            "interpolate", ["linear"], ["zoom"],
+            3, 12,
+            8, 14,
+            12, 16,
+          ],
+          "circle-color": "#000000",
+          "circle-opacity": 0.01,
         },
       });
     });
@@ -404,11 +418,16 @@ export function IndiaMap({
     const popup = new mapboxgl.Popup({
       closeButton: false,
       closeOnClick: false,
-      offset: 10,
+      offset: 14,
+      maxWidth: "280px",
+    });
+    popup.on("close", () => {
+      activeFacilityPopupRef.current = null;
     });
     popupRef.current = popup;
 
     map.on("mouseenter", "state-circles", (e) => {
+      if (activeFacilityPopupRef.current) return;
       map.getCanvas().style.cursor = "pointer";
       const f = e.features?.[0];
       if (!f || !f.properties) return;
@@ -431,10 +450,13 @@ export function IndiaMap({
 
     map.on("mouseleave", "state-circles", () => {
       map.getCanvas().style.cursor = "";
-      popup.remove();
+      if (!activeFacilityPopupRef.current) popup.remove();
     });
 
     map.on("click", "state-circles", (e) => {
+      activeFacilityPopupRef.current = null;
+      setSelectedFacility(null);
+      popup.remove();
       const f = e.features?.[0];
       if (f?.properties) {
         onRegionClick(
@@ -445,6 +467,7 @@ export function IndiaMap({
     });
 
     map.on("mouseenter", "city-clusters", (e) => {
+      if (activeFacilityPopupRef.current) return;
       map.getCanvas().style.cursor = "pointer";
       const f = e.features?.[0];
       if (!f || !f.properties) return;
@@ -463,44 +486,33 @@ export function IndiaMap({
 
     map.on("mouseleave", "city-clusters", () => {
       map.getCanvas().style.cursor = "";
-      popup.remove();
+      if (!activeFacilityPopupRef.current) popup.remove();
     });
 
     // --- Facility dot interactions ---
-    map.on("mouseenter", "facility-dots", (e) => {
+    map.on("mouseenter", "facility-hit-targets", () => {
       map.getCanvas().style.cursor = "pointer";
-      const f = e.features?.[0];
-      if (!f || !f.properties) return;
-      const p = f.properties;
-      const score =
-        p.trust_score != null ? Math.round(Number(p.trust_score)) : "N/A";
-      popup
-        .setLngLat(
-          (f.geometry as GeoJSON.Point).coordinates as [number, number]
-        )
-        .setHTML(
-          `<div style="font-family:system-ui;font-size:12px;line-height:1.5;min-width:140px">` +
-            `<strong>${p.name}</strong><br/>` +
-            `<span style="color:${p.color};font-weight:600">Trust ${score}</span>` +
-            (p.city ? ` &middot; ${p.city}` : "") +
-            (p.state ? `<br/><span style="color:#6b7280">${p.state}</span>` : "") +
-            (p.type ? `<br/><span style="color:#6b7280;font-size:11px">${p.type}</span>` : "") +
-            `</div>`
-        )
-        .addTo(map);
     });
 
-    map.on("mouseleave", "facility-dots", () => {
+    map.on("mouseleave", "facility-hit-targets", () => {
       map.getCanvas().style.cursor = "";
-      popup.remove();
     });
 
-    map.on("click", "facility-dots", (e) => {
+    map.on("click", "facility-hit-targets", (e) => {
       const f = e.features?.[0];
       if (!f?.properties) return;
-      const id = f.properties.facility_id;
-      // Navigate to facility detail page
-      window.open(`/facility/${id}`, "_blank");
+      const coordinates = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+      const p = f.properties;
+      activeFacilityPopupRef.current = String(p.facility_id);
+      popup.remove();
+      setSelectedFacility(facilityCardFromProperties(p, coordinates, map.project(coordinates)));
+    });
+
+    map.on("move", () => {
+      setSelectedFacility((current) => current ? {
+        ...current,
+        point: map.project(current.coordinates),
+      } : current);
     });
 
     return () => {
@@ -558,39 +570,19 @@ export function IndiaMap({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Capability pills */}
-      <div className="flex items-center gap-4 px-4 py-3 border-b border-border shrink-0">
-        <div className="flex flex-wrap gap-1.5 flex-1">
-          {CAPABILITY_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              onClick={() => handleCapChange(opt.key)}
-              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                activeCap === opt.key
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "border-border text-text-muted hover:border-text-muted/50"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <LegendDot color="#10b981" label="≥70%" />
-          <LegendDot color="#fbbf24" label="40–69%" />
-          <LegendDot color="#ef4444" label="<40%" />
-        </div>
-      </div>
-
       {/* Summary bar */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-border/50 shrink-0 bg-muted/30">
         <span className="text-xs text-text-muted">
           {aggregates.length} {level}s
         </span>
-        <Badge variant="outline" className="text-xs font-mono h-5">
-          {CAPABILITY_OPTIONS.find((o) => o.key === activeCap)?.label ??
-            activeCap}
-        </Badge>
+        <span className="inline-flex h-5 items-center rounded-md border hairline bg-surface px-2 font-mono text-xs">
+          {CAPABILITY_OPTIONS.find((o) => o.key === capability)?.label ?? capability}
+        </span>
+        <span className="flex items-center gap-3">
+          <LegendDot color="#10b981" label="≥70%" />
+          <LegendDot color="#fbbf24" label="40–69%" />
+          <LegendDot color="#ef4444" label="<40%" />
+        </span>
         <span className="text-xs text-text-muted ml-auto font-mono tabular-nums">
           {totalVerified}/{totalClaimed} verified nationally
         </span>
@@ -613,21 +605,76 @@ export function IndiaMap({
               </span>
             </div>
           ))}
-          {overlay.zoom >= FACILITY_DOT_MIN_ZOOM && overlay.facilities.map((facility) => (
-            <button
-              key={facility.key}
-              type="button"
-              aria-label={facility.name}
-              title={facility.name}
-              onClick={() => window.open(`/facility/${facility.id}`, "_blank")}
-              className="pointer-events-auto absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white shadow-sm transition-transform hover:scale-150"
-              style={{ left: facility.x, top: facility.y, background: facility.color }}
-            />
-          ))}
         </div>
+        {selectedFacility && (
+          <FacilityInfoCard
+            facility={selectedFacility}
+            capability={capability}
+            onClose={() => {
+              activeFacilityPopupRef.current = null;
+              setSelectedFacility(null);
+            }}
+          />
+        )}
       </div>
     </div>
   );
+}
+
+function FacilityInfoCard({ facility, capability, onClose }: { facility: SelectedFacilityCard; capability: string; onClose: () => void }) {
+  const capabilityLabel = CAPABILITY_OPTIONS.find((item) => item.key === capability)?.label ?? capability;
+  const score = facility.trust_score != null ? Math.round(facility.trust_score) : "N/A";
+  const location = [facility.city, facility.state].filter(Boolean).join(", ") || "Location unavailable";
+  const top = Math.max(18, facility.point.y - 18);
+
+  return (
+    <div
+      className="pointer-events-auto absolute z-30 w-[280px] origin-bottom rounded-lg border border-primary/20 bg-surface p-3 shadow-xl ring-1 ring-black/5 prompt-slide"
+      style={{ left: `clamp(150px, ${facility.point.x}px, calc(100% - 150px))`, top, transform: "translate(-50%, -100%)" }}
+    >
+      <button
+        type="button"
+        aria-label="Close facility card"
+        onClick={onClose}
+        className="absolute right-2 top-2 rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-surface-muted hover:text-foreground"
+      >
+        x
+      </button>
+      <a href={`/facility/${encodeURIComponent(facility.facility_id)}`} className="mr-7 block text-[14px] font-semibold leading-snug text-primary underline underline-offset-2">
+        {facility.name}
+      </a>
+      <div className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+        {location}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <span className="rounded-full border border-primary/20 bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary-soft-foreground">{capabilityLabel}</span>
+        {facility.type && <span className="rounded-full border hairline bg-surface-muted px-2 py-0.5 text-[11px] text-muted-foreground">{facility.type}</span>}
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 border-t hairline pt-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Overall trust</div>
+          <div className="mt-0.5 font-mono text-[16px] font-semibold" style={{ color: facility.color }}>{score}</div>
+        </div>
+        <a href={`/facility/${encodeURIComponent(facility.facility_id)}`} className="rounded-md border border-primary/25 bg-primary-soft px-2.5 py-1.5 text-[12px] font-medium text-primary hover:border-primary/45">
+          View details
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function facilityCardFromProperties(properties: mapboxgl.GeoJSONFeature["properties"], coordinates: [number, number], point: { x: number; y: number }): SelectedFacilityCard {
+  return {
+    facility_id: String(properties?.facility_id ?? ""),
+    name: String(properties?.name ?? "Facility"),
+    city: String(properties?.city ?? ""),
+    state: String(properties?.state ?? ""),
+    type: String(properties?.type ?? ""),
+    trust_score: properties?.trust_score != null ? Number(properties.trust_score) : null,
+    color: String(properties?.color ?? "#0f5e5a"),
+    coordinates,
+    point: { x: point.x, y: point.y },
+  };
 }
 
 function LegendDot({ color, label }: { color: string; label: string }) {

@@ -288,6 +288,7 @@ class AutoReviewBucket(StrEnum):
 
 
 class AutoReviewResult(BaseModel):
+    task_id: str
     facility_id: str
     facility_name: str | None = None
     bucket: AutoReviewBucket

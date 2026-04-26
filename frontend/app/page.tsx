@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Brain, Map as MapIcon, Search, Zap } from "lucide-react";
-import { AppShell, Metric } from "@/components/atlas/primitives";
+import { AppShell, Hint, Metric } from "@/components/atlas/primitives";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_PROMPTS } from "@/lib/atlas";
 import type { DataHealthResponse, HealthCheck } from "@/lib/types";
@@ -119,8 +119,12 @@ export default function MissionControl() {
                 </div>
                 <div className="flex items-center justify-between gap-2 border-t hairline px-3 py-2 md:px-4">
                   <div className="inline-flex rounded-md border hairline bg-surface-muted p-0.5 text-[12px]">
-                    <ModeButton active={mode === "fast"} onClick={() => setMode("fast")} icon={Zap} label="Fast Search" />
-                    <ModeButton active={mode === "deep"} onClick={() => setMode("deep")} icon={Brain} label="Deep Reasoning" />
+                    <Hint text="Fast Search quickly matches the meaning of your request to relevant facilities and evidence.">
+                      <ModeButton active={mode === "fast"} onClick={() => setMode("fast")} icon={Zap} label="Fast Search" />
+                    </Hint>
+                    <Hint text="Deep Reasoning uses an AI agent workflow to investigate the request, compare evidence, and explain the answer.">
+                      <ModeButton active={mode === "deep"} onClick={() => setMode("deep")} icon={Brain} label="Deep Reasoning" />
+                    </Hint>
                   </div>
                   <button type="button" onClick={() => router.push("/map")} className="hidden items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground sm:inline-flex">
                     <MapIcon className="h-3.5 w-3.5" /> Open capability map

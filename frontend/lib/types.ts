@@ -225,6 +225,7 @@ export interface AutoReviewRunResponse {
   created: number;
   summary: AutoReviewSummary;
   results: Array<{
+    task_id: string;
     facility_id: string;
     facility_name: string | null;
     bucket: string;

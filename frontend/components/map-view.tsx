@@ -7,7 +7,7 @@ import type { AggregateRow, AggregateLevel, FacilityPoint } from "@/lib/types";
 export function MapView() {
   const [aggregates, setAggregates] = useState<AggregateRow[]>([]);
   const [facilities, setFacilities] = useState<FacilityPoint[]>([]);
-  const [capability, setCapability] = useState("has_nicu");
+  const [capability] = useState("has_nicu");
   const [level] = useState<AggregateLevel>("state");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,10 +84,6 @@ export function MapView() {
         capability={capability}
         level={level}
         onRegionClick={() => {}}
-        onCapabilityChange={(cap) => {
-          setCapability(cap);
-          fetchAggregates(cap, level);
-        }}
       />
     </div>
   );

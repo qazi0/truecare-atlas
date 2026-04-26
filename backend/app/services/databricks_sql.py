@@ -939,7 +939,7 @@ def query_data_health_metrics() -> dict:
         SELECT
             COUNT(*) AS total_facilities,
             AVG(trust_score) AS avg_trust_score,
-            SUM(CASE WHEN trust_score >= 80 THEN 1 ELSE 0 END) AS high_trust,
+            SUM(CASE WHEN trust_score >= 80 AND COALESCE(flag_count, 0) = 0 THEN 1 ELSE 0 END) AS high_trust,
             SUM(CASE WHEN trust_score >= 50 AND trust_score < 80 THEN 1 ELSE 0 END) AS medium_trust,
             SUM(CASE WHEN trust_score < 50 THEN 1 ELSE 0 END) AS low_trust,
             SUM(CASE WHEN flag_count > 0 THEN 1 ELSE 0 END) AS review_needed,

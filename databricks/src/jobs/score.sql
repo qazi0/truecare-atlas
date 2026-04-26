@@ -5,14 +5,14 @@
 -- COMMAND ----------
 
 -- Rule severity weights (higher = more severe deduction)
--- R1 Anesthesia gap: 15
--- R2 NICU staffing gap: 15
--- R3 Cancer specialty gap: 15
--- R4 24/7 gap: 10
--- R5 Bed-count contradiction: 12
--- R6 Modality contradiction: 20
--- R7 Scrape artifact density: 8
--- R8 Evidence sparsity: 10
+-- R1 Anesthesia gap: 25
+-- R2 NICU staffing gap: 25
+-- R3 Cancer specialty gap: 25
+-- R4 24/7 gap: 12
+-- R5 Bed-count contradiction: 18
+-- R6 Modality contradiction: 35
+-- R7 Scrape artifact density: 12
+-- R8 Evidence sparsity: 15
 
 CREATE OR REPLACE TABLE workspace.default.gold_facility_trust AS
 
@@ -161,14 +161,14 @@ scored AS (
 
     -- Composite deduction
     (
-      CASE WHEN r1_anesthesia_gap THEN 15 ELSE 0 END
-      + CASE WHEN r2_nicu_staffing_gap THEN 15 ELSE 0 END
-      + CASE WHEN r3_cancer_specialty_gap THEN 15 ELSE 0 END
-      + CASE WHEN r4_24x7_gap THEN 10 ELSE 0 END
-      + CASE WHEN r5_bed_count_contradiction THEN 12 ELSE 0 END
-      + CASE WHEN r6_modality_contradiction THEN 20 ELSE 0 END
-      + CASE WHEN r7_scrape_artifact_density THEN 8 ELSE 0 END
-      + CASE WHEN r8_evidence_sparsity THEN 10 ELSE 0 END
+      CASE WHEN r1_anesthesia_gap THEN 25 ELSE 0 END
+      + CASE WHEN r2_nicu_staffing_gap THEN 25 ELSE 0 END
+      + CASE WHEN r3_cancer_specialty_gap THEN 25 ELSE 0 END
+      + CASE WHEN r4_24x7_gap THEN 12 ELSE 0 END
+      + CASE WHEN r5_bed_count_contradiction THEN 18 ELSE 0 END
+      + CASE WHEN r6_modality_contradiction THEN 35 ELSE 0 END
+      + CASE WHEN r7_scrape_artifact_density THEN 12 ELSE 0 END
+      + CASE WHEN r8_evidence_sparsity THEN 15 ELSE 0 END
     ) AS total_deduction,
 
     -- Number of flags triggered
@@ -204,7 +204,7 @@ SELECT
 
   -- Trust bucket for vector search filter
   CASE
-    WHEN 100 - total_deduction >= 70 THEN 'high'
+    WHEN 100 - total_deduction >= 80 AND flag_count = 0 THEN 'high'
     WHEN 100 - total_deduction >= 40 THEN 'mid'
     ELSE 'low'
   END AS trust_score_bucket,

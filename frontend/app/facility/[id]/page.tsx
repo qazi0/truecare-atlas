@@ -28,7 +28,7 @@ export default function FacilityPage() {
     fetch(`/api/validate?id=${encodeURIComponent(id)}`).then((r) => r.ok ? r.json() : null).then(setValidation).catch(() => null);
   }, [id]);
 
-  if (!facility) return <AppShell><div className="p-6"><EmptyState title="Loading facility" detail={id} /></div></AppShell>;
+  if (!facility) return <AppShell><FacilitySkeleton id={id} /></AppShell>;
 
   const rows = activeEvidenceRows(facility);
   const status = deriveStatus(facility);
@@ -39,12 +39,12 @@ export default function FacilityPage() {
       <div className="border-b hairline bg-background">
         <div className="flex items-center gap-3 px-4 py-2.5">
           <Link href="/command" className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Back</Link>
-          <Breadcrumbs items={[{ label: "Command", to: "/command" }, { label: facility.name }]} />
+          <Breadcrumbs items={[{ label: "Search", to: "/command" }, { label: facility.name }]} />
         </div>
       </div>
       <header className="border-b hairline bg-surface">
         <div className="flex flex-wrap items-start gap-5 px-6 py-5">
-          <TrustRing score={facility.trust_score} size={84} />
+          <TrustRing score={facility.trust_score} status={status} size={84} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2"><h1 className="text-[22px] font-semibold tracking-tight">{facility.name}</h1><StatusBadge status={status} /></div>
             <div className="mt-1 flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground"><span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {formatLocation(facility)}</span><span className="h-3 w-px bg-hairline" /><span>{facility.facility_type || "Facility"}</span><span className="h-3 w-px bg-hairline" /><span className="font-mono">id {facility.facility_id}</span></div>
@@ -69,7 +69,7 @@ export default function FacilityPage() {
           {tab === "Trace" && <Section title="Trace" subtitle="Facility scoring provenance"><TracePanel id={facility.facility_id} rows={rows.length} flags={facility.trust_report?.flags.length ?? 0} /></Section>}
         </div>
         <aside className="flex flex-col gap-4">
-          <Panel title="Trust score"><div className="flex items-center gap-3"><TrustRing score={facility.trust_score} size={64} /><p className="text-[12px] text-muted-foreground">Score combines evidence directness, trust flags, and cross-field plausibility.</p></div></Panel>
+          <Panel title="Trust score"><div className="flex items-center gap-3"><TrustRing score={facility.trust_score} status={status} size={64} /><p className="text-[12px] text-muted-foreground">Score combines evidence directness, trust flags, and cross-field plausibility.</p></div></Panel>
           <Panel title="Evidence summary"><Summary rows={rows} /></Panel>
           <Panel title="Provenance"><ul className="flex flex-col gap-1 font-mono text-[12px] text-muted-foreground"><li>silver_facility</li><li>gold_facility_capabilities</li><li>gold_facility_trust</li><li>validator agent</li></ul></Panel>
         </aside>
@@ -120,4 +120,50 @@ async function exportFacility(id: string) {
   const a = document.createElement("a");
   a.href = url; a.download = "truecare-facility.csv"; a.click();
   URL.revokeObjectURL(url);
+}
+
+function FacilitySkeleton({ id }: { id: string }) {
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="border-b hairline bg-background px-4 py-2.5">
+        <div className="loading-shimmer h-4 w-56 rounded" />
+      </div>
+      <header className="border-b hairline bg-surface px-6 py-5">
+        <div className="flex flex-wrap items-start gap-5">
+          <div className="loading-shimmer h-20 w-20 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="loading-shimmer h-6 w-2/5 rounded" />
+            <div className="loading-shimmer h-3.5 w-3/5 rounded" />
+            <div className="flex gap-1.5">
+              <div className="loading-shimmer h-5 w-16 rounded" />
+              <div className="loading-shimmer h-5 w-20 rounded" />
+              <div className="loading-shimmer h-5 w-14 rounded" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {Array.from({ length: 4 }).map((_, i) => <div key={i} className="loading-shimmer h-8 w-20 rounded-md" />)}
+          </div>
+        </div>
+        <div className="mt-5 flex gap-2">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="loading-shimmer h-8 w-24 rounded" />)}
+        </div>
+      </header>
+      <div className="grid flex-1 grid-cols-1 gap-5 px-6 py-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-5">
+          <div className="rounded-md border hairline bg-surface p-4">
+            <div className="loading-shimmer mb-3 h-4 w-40 rounded" />
+            {Array.from({ length: 6 }).map((_, i) => <div key={i} className="loading-shimmer mb-2 h-9 rounded" />)}
+          </div>
+          <div className="rounded-md border hairline bg-surface p-4">
+            <div className="loading-shimmer mb-3 h-4 w-32 rounded" />
+            <div className="loading-shimmer h-24 rounded" />
+          </div>
+        </div>
+        <aside className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="rounded-md border hairline bg-surface p-4"><div className="loading-shimmer mb-3 h-3 w-28 rounded" /><div className="loading-shimmer h-20 rounded" /></div>)}
+        </aside>
+      </div>
+      <span className="sr-only">Loading facility {id}</span>
+    </div>
+  );
 }

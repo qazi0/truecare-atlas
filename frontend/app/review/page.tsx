@@ -3,19 +3,17 @@
 /* eslint-disable react-hooks/set-state-in-effect, react/no-unescaped-entities */
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Check, CheckCircle2, ChevronRight, Filter, Loader2, MessageSquare, Phone, UserPlus, X, Zap } from "lucide-react";
-import { AppShell, EmptyState } from "@/components/atlas/primitives";
+import { Activity, Check, CheckCircle2, ChevronRight, Loader2, MessageSquare, Phone, UserPlus, X, Zap } from "lucide-react";
+import { AppShell, EmptyState, Hint } from "@/components/atlas/primitives";
 import { Button } from "@/components/ui/button";
 import { clearClientCache, readClientCache, writeClientCache } from "@/lib/client-cache";
 import type { AutoReviewRunResponse, AutoReviewSummary, ReviewTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const FILTERS = ["Contradictions", "Low evidence", "Generated", "Open work"];
 const TABS = ["Urgent", "Phone verify", "Field visit", "Specialist review", "Low-risk", "Rejected"] as const;
 const REVIEW_CACHE_KEY = "truecare.cache.reviews";
 const REVIEW_TTL_MS = 30_000;
 const REVIEW_PAGE_SIZE = 8;
-const OPEN_STATUSES = new Set(["pending", "phone_verification"]);
 const TRIAGE_STEPS = [
   "Pull next 50 generated candidates",
   "Classify evidence gaps and contradictions",
@@ -34,12 +32,12 @@ interface ReviewGroup {
 
 export default function ReviewPage() {
   const [tasks, setTasks] = useState<ReviewTask[]>([]);
-  const [active, setActive] = useState<string[]>(["Open work"]);
   const [tab, setTab] = useState<(typeof TABS)[number]>("Urgent");
   const [summary, setSummary] = useState<AutoReviewSummary | null>(null);
   const [triaging, setTriaging] = useState(false);
   const [triageRun, setTriageRun] = useState<AutoReviewRunResponse | null>(null);
   const [triageStep, setTriageStep] = useState(0);
+  const [approvingTriage, setApprovingTriage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filterLoading, setFilterLoading] = useState(false);
   const [counterFilter, setCounterFilter] = useState<CounterFilter>(null);
@@ -69,12 +67,8 @@ export default function ReviewPage() {
     if (counterFilter === "progress") return task.status === "phone_verification";
     if (counterFilter === "contradictions") return task.severity === "red";
     if (counterFilter === "generated") return task.source === "generated";
-    if (active.includes("Contradictions") && task.severity !== "red") return false;
-    if (active.includes("Low evidence") && task.severity !== "yellow") return false;
-    if (active.includes("Generated") && task.source !== "generated") return false;
-    if (active.includes("Open work") && !OPEN_STATUSES.has(task.status)) return false;
     return matchesTab(task, tab);
-  }), [active, counterFilter, tab, tasks]);
+  }), [counterFilter, tab, tasks]);
 
   const groups = useMemo(() => groupReviewTasks(filtered), [filtered]);
   const totalPages = Math.max(1, Math.ceil(groups.length / REVIEW_PAGE_SIZE));
@@ -86,19 +80,15 @@ export default function ReviewPage() {
     contradictions: tasks.filter((t) => t.severity === "red").length,
     generated: tasks.filter((t) => t.source === "generated").length,
   };
+  const tabCounts = useMemo(() => Object.fromEntries(TABS.map((item) => [item, tasks.filter((task) => matchesTab(task, item)).length])) as Record<(typeof TABS)[number], number>, [tasks]);
 
   useEffect(() => {
     setPage(0);
-  }, [active, counterFilter, tab]);
+  }, [counterFilter, tab]);
 
   useEffect(() => {
     if (page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
   }, [page, totalPages]);
-
-  function toggle(filter: string) {
-    setActive((items) => items.includes(filter) ? items.filter((item) => item !== filter) : [...items, filter]);
-    setPage(0);
-  }
 
   function applyCounterFilter(filter: CounterFilter) {
     setFilterLoading(true);
@@ -110,19 +100,34 @@ export default function ReviewPage() {
   }
 
   async function runAutoTriage() {
-    const timer = window.setInterval(() => setTriageStep((step) => Math.min(TRIAGE_STEPS.length - 1, step + 1)), 450);
     setTriageRun(null);
     setTriageStep(0);
     setTriaging(true);
-    await fetch("/api/reviews/auto-run?limit=50", { method: "POST" }).then((r) => r.ok ? r.json() : null).then((data) => {
+    const runPromise = fetch("/api/reviews/auto-run?limit=50", { method: "POST" }).then((r) => r.ok ? r.json() : null).then((data) => {
       if (data?.summary) setSummary(data.summary);
       if (data) setTriageRun(data);
     }).catch(() => null);
-    window.clearInterval(timer);
+    await Promise.all([runPromise, playStepSequence(setTriageStep, TRIAGE_STEPS.length)]);
     setTriageStep(TRIAGE_STEPS.length);
     clearClientCache(REVIEW_CACHE_KEY);
     await load(true);
     setTriaging(false);
+  }
+
+  async function approveAutoTriage() {
+    if (!triageRun?.results.length) return;
+    setApprovingTriage(true);
+    await Promise.all(triageRun.results.map((item) => {
+      const body = reviewPatchForBucket(item.bucket);
+      return fetch(`/api/reviews/${encodeURIComponent(item.task_id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    }));
+    clearClientCache(REVIEW_CACHE_KEY);
+    await load(true);
+    setApprovingTriage(false);
   }
 
   async function patch(id: string, body: Partial<ReviewTask> & { note?: string }) {
@@ -158,17 +163,17 @@ export default function ReviewPage() {
           <Counter label="Generated" value={counters.generated} active={counterFilter === "generated"} onClick={() => applyCounterFilter("generated")} />
           {summary && <span className="rounded-md border hairline bg-surface px-2 py-1 text-[11px] text-muted-foreground">{summary.total_candidates.toLocaleString()} candidates to {summary.buckets.phone_verify ?? 0} phone, {summary.buckets.field_visit_required ?? 0} field, {summary.buckets.auto_verified_low_risk ?? 0} low-risk</span>}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
-            <Button size="sm" className="h-7 text-[11px]" disabled={triaging} onClick={runAutoTriage}>{triaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />} Auto-triage next 50</Button>
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><Filter className="h-3 w-3" /> Filters</span>
-            {FILTERS.map((filter) => <button key={filter} onClick={() => toggle(filter)} className={cn("rounded-full border px-2 py-0.5 text-[11px]", active.includes(filter) ? "border-primary bg-primary text-primary-foreground" : "hairline bg-surface text-muted-foreground")}>{filter}</button>)}
+            <Hint text="Groups the next review candidates by the kind of follow-up they need, then lets you approve the suggested actions.">
+              <Button size="sm" className="h-9 px-4 text-[13px]" disabled={triaging} onClick={runAutoTriage}>{triaging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />} Auto-triage next 50 review items</Button>
+            </Hint>
           </div>
         </div>
         <div className="flex gap-1 overflow-x-auto border-t hairline px-4 py-2">
-          {TABS.map((item) => <button key={item} onClick={() => setTab(item)} className={cn("whitespace-nowrap rounded-md px-2.5 py-1 text-[12px]", tab === item ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-surface-muted")}>{item}</button>)}
+          {TABS.map((item) => <button key={item} onClick={() => setTab(item)} className={cn("whitespace-nowrap rounded-md px-2.5 py-1 text-[12px]", tab === item ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-surface-muted")}>{item} <span className="ml-1 font-mono opacity-80">{tabCounts[item] ?? 0}</span></button>)}
         </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
-        {(triaging || triageRun) && <TriageActivity running={triaging} step={triageStep} run={triageRun} />}
+        {(triaging || triageRun) && <TriageActivity running={triaging} step={triageStep} run={triageRun} approving={approvingTriage} onApprove={approveAutoTriage} />}
         {(loading || filterLoading) && <ReviewSkeleton />}
         {!loading && !filterLoading && visibleGroups.map((group) => (
           <article key={group.facilityId} className="rounded-lg border hairline bg-surface">
@@ -182,7 +187,7 @@ export default function ReviewPage() {
                 </div>
                 <div className="mt-1.5 text-[14px] font-medium leading-tight">{group.facilityName}</div>
                 <div className="mt-2 flex flex-wrap gap-1">{group.tasks.map((task) => <IssueBadge key={task.id} task={task} />)}</div>
-                <div className="mt-3 text-[11px] text-muted-foreground">Owner: <span className="font-medium text-foreground">{group.owner || "Unassigned"}</span></div>
+                <div className="mt-3 text-[11px] text-muted-foreground">Owner: <span className="font-medium text-foreground">{displayReviewLabel(group.owner || "Unassigned")}</span></div>
                 <div className="text-[11px] text-muted-foreground">Status: <span className="font-medium text-foreground">{statusSummary(group.tasks)}</span></div>
               </div>
               <div className="flex flex-col gap-3 p-4">
@@ -191,7 +196,7 @@ export default function ReviewPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <IssueBadge task={task} />
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Claim under review</div>
-                      <span className="ml-auto text-[11px] text-muted-foreground">Source: <span className="font-medium text-foreground">{task.source}</span></span>
+                      <span className="ml-auto text-[11px] text-muted-foreground">Source: <span className="font-medium text-foreground">{displayReviewLabel(task.source)}</span></span>
                     </div>
                     <p className="mt-1 text-[13px]">"{task.claim || task.reason}"</p>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -238,20 +243,21 @@ function Counter({ label, value, tone, active, onClick }: { label: string; value
   return <button onClick={onClick} className={cn("inline-flex items-baseline gap-1.5 rounded-md border px-2 py-1 transition", active ? "border-primary bg-primary-soft text-primary" : "hairline bg-surface hover:border-primary/40")}><span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span><span className={cn("font-mono text-[13px] font-semibold", color)}>{value}</span></button>;
 }
 
-function TriageActivity({ running, step, run }: { running: boolean; step: number; run: AutoReviewRunResponse | null }) {
+function TriageActivity({ running, step, run, approving, onApprove }: { running: boolean; step: number; run: AutoReviewRunResponse | null; approving: boolean; onApprove: () => void }) {
+  const visibleSteps = TRIAGE_STEPS.slice(0, Math.max(1, Math.min(TRIAGE_STEPS.length, step + 1)));
   return (
     <div className="rounded-lg border border-primary/20 bg-primary-soft/60 p-3.5">
       <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-primary-soft-foreground">
         {running ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <CheckCircle2 className="h-4 w-4 text-trust" />}
         Auto-triage agent
-        {run && <span className="ml-auto font-mono text-[11px] text-muted-foreground">{run.processed} processed · {run.created} created</span>}
+        {run && <span className="ml-auto font-mono text-[11px] text-muted-foreground">{run.processed} proposed</span>}
       </div>
-      <ol className="grid gap-2 lg:grid-cols-4">
-        {TRIAGE_STEPS.map((item, index) => {
+      <ol className="flex flex-col gap-2">
+        {visibleSteps.map((item, index) => {
           const done = step > index;
           const active = running && step === index;
           return (
-            <li key={item} className="rounded-md border hairline bg-surface/80 px-3 py-2 text-[12px]">
+            <li key={item} className="prompt-slide rounded-md border hairline bg-surface/80 px-3 py-2 text-[12px]">
               <div className="flex items-center gap-2">
                 {active ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : done ? <CheckCircle2 className="h-3.5 w-3.5 text-trust" /> : <span className="h-3.5 w-3.5 rounded-full border hairline" />}
                 <span>{item}</span>
@@ -274,7 +280,7 @@ function TriageActivity({ running, step, run }: { running: boolean; step: number
             </div>
           </div>
           <div className="rounded-md border hairline bg-surface/80 p-3">
-            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Activity className="h-3 w-3" /> Recent classifications</div>
+            <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Activity className="h-3 w-3" /> Proposed classifications</div>
             <ul className="grid gap-1.5 md:grid-cols-2">
               {run.results.slice(0, 6).map((item, index) => (
                 <li key={`${item.facility_id}-${item.bucket}-${index}`} className="rounded border hairline bg-background px-2 py-1.5 text-[11px]">
@@ -286,6 +292,10 @@ function TriageActivity({ running, step, run }: { running: boolean; step: number
                 </li>
               ))}
             </ul>
+            <Button size="sm" className="mt-3 h-8 text-[12px]" disabled={approving} onClick={onApprove}>
+              {approving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              Approve classifications
+            </Button>
           </div>
         </div>
       )}
@@ -329,7 +339,7 @@ function bucketLabel(bucket: string): string {
 
 function Severity({ severity }: { severity: ReviewTask["severity"] }) {
   const cls = severity === "red" ? "bg-alert-soft text-alert" : severity === "yellow" ? "bg-caution-soft text-caution" : "bg-primary-soft text-primary-soft-foreground";
-  return <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", cls)}>{severity}</span>;
+  return <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", cls)}>{displayReviewLabel(severity)}</span>;
 }
 
 function Evidence({ title, tone, items }: { title: string; tone: "trust" | "alert"; items: string[] }) {
@@ -337,13 +347,34 @@ function Evidence({ title, tone, items }: { title: string; tone: "trust" | "aler
 }
 
 function matchesTab(task: ReviewTask, tab: (typeof TABS)[number]): boolean {
-  const reason = task.reason.toLowerCase();
+  const bucket = derivedBucket(task);
   if (tab === "Urgent") return task.severity === "red" && task.status !== "rejected";
-  if (tab === "Phone verify") return task.status === "phone_verification" || reason.includes("phone_verify");
-  if (tab === "Field visit") return reason.includes("field_visit_required");
-  if (tab === "Specialist review") return reason.includes("specialist_review");
-  if (tab === "Low-risk") return reason.includes("auto_verified_low_risk");
+  if (tab === "Phone verify") return task.status === "phone_verification" || bucket === "phone_verify";
+  if (tab === "Field visit") return bucket === "field_visit_required";
+  if (tab === "Specialist review") return bucket === "specialist_review";
+  if (tab === "Low-risk") return bucket === "auto_verified_low_risk" || task.status === "accepted";
   return task.status === "rejected";
+}
+
+function derivedBucket(task: ReviewTask): string {
+  const text = `${task.reason} ${task.evidence_for.join(" ")} ${task.evidence_against.join(" ")} ${task.notes.map((note) => note.text).join(" ")}`.toLowerCase();
+  if (text.includes("auto-triage bucket: phone_verify")) return "phone_verify";
+  if (text.includes("auto-triage bucket: field_visit_required")) return "field_visit_required";
+  if (text.includes("auto-triage bucket: specialist_review")) return "specialist_review";
+  if (text.includes("auto-triage bucket: auto_verified_low_risk")) return "auto_verified_low_risk";
+  if (text.includes("auto-triage bucket: reject_or_low_confidence")) return "reject_or_low_confidence";
+  if (task.severity === "red" && (text.includes("contradiction") || text.includes("modality"))) return "specialist_review";
+  if (task.severity === "red") return "field_visit_required";
+  if (text.includes("sparse") || text.includes("weak") || task.evidence_for.length === 0) return "phone_verify";
+  return "auto_verified_low_risk";
+}
+
+function reviewPatchForBucket(bucket: string): Partial<ReviewTask> & { note: string } {
+  if (bucket === "phone_verify") return { status: "phone_verification", owner: "Phone team", note: "Auto-triage bucket: phone_verify. Approved for phone verification." };
+  if (bucket === "auto_verified_low_risk") return { status: "accepted", owner: "Auto triage", note: "Auto-triage bucket: auto_verified_low_risk. Approved as low-risk." };
+  if (bucket === "reject_or_low_confidence") return { status: "rejected", owner: "Auto triage", note: "Auto-triage bucket: reject_or_low_confidence. Approved for rejection until resolved." };
+  if (bucket === "specialist_review") return { status: "pending", owner: "Clinical reviewer", note: "Auto-triage bucket: specialist_review. Approved for specialist review." };
+  return { status: "pending", owner: "Field team", note: "Auto-triage bucket: field_visit_required. Approved for field verification." };
 }
 
 function groupReviewTasks(tasks: ReviewTask[]): ReviewGroup[] {
@@ -381,8 +412,32 @@ function severityRank(severity: ReviewTask["severity"]): number {
 }
 
 function statusSummary(tasks: ReviewTask[]): string {
-  const statuses = Array.from(new Set(tasks.map((task) => task.status.replace("_", " "))));
-  return statuses.length === 1 ? statuses[0] : `${statuses.length} statuses`;
+  const statuses = Array.from(new Set(tasks.map((task) => displayReviewLabel(task.status))));
+  return statuses.length === 1 ? statuses[0] : `${statuses.length} Statuses`;
+}
+
+function displayReviewLabel(value: string): string {
+  const normalized = value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  return normalized
+    .replace(/\bOk\b/g, "OK")
+    .replace(/\bId\b/g, "ID")
+    .replace(/\bIcu\b/g, "ICU")
+    .replace(/\bNicu\b/g, "NICU");
+}
+
+async function playStepSequence(setStep: (step: number) => void, totalSteps: number) {
+  for (let step = 1; step < totalSteps; step += 1) {
+    await delay(randomStepDelay());
+    setStep(step);
+  }
+}
+
+function randomStepDelay(): number {
+  return 800 + Math.floor(Math.random() * 2200);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function issueRank(task: ReviewTask): number {

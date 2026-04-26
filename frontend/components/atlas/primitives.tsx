@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type { FacilityStatus } from "@/lib/atlas";
 
 const NAV = [
-  { to: "/command", label: "Command", icon: Search },
+  { to: "/command", label: "Search", icon: Search },
   { to: "/map", label: "Map", icon: Map },
   { to: "/planner", label: "Planner", icon: Route },
   { to: "/shortlist", label: "Shortlist", icon: ListChecks },
@@ -174,12 +174,16 @@ export function Breadcrumbs({ items }: { items: { label: string; to?: string }[]
   );
 }
 
-export function TrustRing({ score, size = 56, showLabel = true }: { score: number | null | undefined; size?: number; showLabel?: boolean }) {
+export function TrustRing({ score, size = 56, showLabel = true, status }: { score: number | null | undefined; size?: number; showLabel?: boolean; status?: FacilityStatus }) {
   const safe = Math.max(0, Math.min(100, score ?? 0));
   const stroke = 4;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const tone = safe >= 85 ? "hsl(var(--trust))" : safe >= 60 ? "hsl(var(--caution))" : "hsl(var(--alert))";
+  const tone = status === "Contradiction"
+    ? "hsl(var(--alert))"
+    : status === "Needs review" || status === "Evidence weak"
+      ? "hsl(var(--caution))"
+      : safe >= 85 ? "hsl(var(--trust))" : safe >= 60 ? "hsl(var(--caution))" : "hsl(var(--alert))";
   return (
     <span className="relative inline-flex items-center justify-center shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
@@ -212,6 +216,17 @@ export function CapabilityBadge({ label, dimmed }: { label: string; dimmed?: boo
   return (
     <span className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium", dimmed ? "border-hairline bg-surface-muted text-muted-foreground" : "border-primary/20 bg-primary-soft text-primary-soft-foreground")}>
       {label}
+    </span>
+  );
+}
+
+export function Hint({ text, children }: { text: string; children: ReactNode }) {
+  return (
+    <span className="group relative inline-flex">
+      {children}
+      <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-64 -translate-x-1/2 rounded-md bg-foreground px-3 py-2 text-left text-[11px] leading-relaxed text-background shadow-lg group-hover:block">
+        {text}
+      </span>
     </span>
   );
 }

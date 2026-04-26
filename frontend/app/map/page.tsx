@@ -2,11 +2,11 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ChevronRight, List, MapPin } from "lucide-react";
-import { AppShell, CapabilityBadge, EmptyState, Metric, StatusBadge, TrustRing } from "@/components/atlas/primitives";
+import { ChevronRight, List, MapPin, Search } from "lucide-react";
+import { AppShell, CapabilityBadge, EmptyState, Hint, Metric, StatusBadge, TrustRing } from "@/components/atlas/primitives";
 import { IndiaMap } from "@/components/india-map";
 import { Button } from "@/components/ui/button";
 import { CAPABILITY_OPTIONS, capabilityLabel, deriveStatus, formatLocation } from "@/lib/atlas";
@@ -15,6 +15,7 @@ import type { AggregateRowWithCI, FacilityHit, FacilityPoint, RegionSummary } fr
 import { cn } from "@/lib/utils";
 
 const MAP_TTL_MS = 5 * 60_000;
+const REGION_SUGGEST_DELAY_MS = 2_000;
 
 export default function MapPage() {
   return (
@@ -30,6 +31,8 @@ function MapContent() {
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [showReview, setShowReview] = useState(true);
   const [region, setRegion] = useState(params.get("region") || "Bihar");
+  const [regionQuery, setRegionQuery] = useState(params.get("region") || "Bihar");
+  const [regionSuggestions, setRegionSuggestions] = useState<string[]>([]);
   const [view, setView] = useState<"map" | "list">("map");
   const [aggregates, setAggregates] = useState<AggregateRowWithCI[]>([]);
   const [facilities, setFacilities] = useState<FacilityPoint[]>([]);
@@ -60,6 +63,30 @@ function MapContent() {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setRegionSuggestions(findRegionSuggestions(regionQuery, aggregates, facilities));
+    }, REGION_SUGGEST_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [aggregates, facilities, regionQuery]);
+
+  function submitRegionSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = regionQuery.trim();
+    const resolved = resolveRegionName(next, aggregates, facilities);
+    if (resolved) {
+      setRegion(resolved);
+      setRegionQuery(resolved);
+      setRegionSuggestions([]);
+    }
+  }
+
+  function selectRegionSuggestion(next: string) {
+    setRegion(next);
+    setRegionQuery(next);
+    setRegionSuggestions([]);
+  }
+
   const national = useMemo(() => aggregates.reduce((acc, row) => ({
     claimed: acc.claimed + row.claimed_count,
     verified: acc.verified + row.verified_count,
@@ -76,20 +103,49 @@ function MapContent() {
             ))}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <Toggle label="Verified only" on={verifiedOnly} onChange={setVerifiedOnly} />
-            <Toggle label="Show review-needed" on={showReview} onChange={setShowReview} />
+            <Toggle label="Verified only" hint="Show facilities that are currently safest to use for planning based on available evidence." on={verifiedOnly} onChange={setVerifiedOnly} />
+            <Toggle label="Show review-needed" hint="Include promising facilities that should be confirmed before referral or field use." on={showReview} onChange={setShowReview} />
             <div className="inline-flex rounded-md border hairline bg-surface-muted p-0.5">
               <button onClick={() => setView("map")} className={cn("inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-[11px]", view === "map" ? "bg-surface shadow-sm" : "text-muted-foreground")}><MapPin className="h-3 w-3" /> Map</button>
               <button onClick={() => setView("list")} className={cn("inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-[11px]", view === "list" ? "bg-surface shadow-sm" : "text-muted-foreground")}><List className="h-3 w-3" /> List</button>
             </div>
           </div>
         </div>
+        <form onSubmit={submitRegionSearch} className="flex flex-wrap items-center gap-2 border-t hairline px-4 py-2">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" htmlFor="map-region-search">Region</label>
+          <div className="flex h-8 min-w-[240px] flex-1 max-w-md items-center gap-2 rounded-md border hairline bg-surface px-2.5 focus-within:ring-2 focus-within:ring-primary/30">
+            <Search className="h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              id="map-region-search"
+              value={regionQuery}
+              onChange={(event) => setRegionQuery(event.target.value)}
+              className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-muted-foreground"
+              placeholder="Search state or city"
+            />
+          </div>
+          <Button type="submit" size="sm" variant="outline" className="h-8 text-[12px]">Update region</Button>
+          {regionSuggestions.length > 0 && (
+            <div className="flex w-full flex-wrap items-center gap-1 pl-[58px] text-[11px]">
+              <span className="mr-1 text-muted-foreground">Suggestions</span>
+              {regionSuggestions.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => selectRegionSuggestion(item)}
+                  className="rounded-full border hairline bg-surface px-2 py-0.5 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          )}
+        </form>
       </div>
 
       <div className="grid flex-1 grid-cols-1 lg:min-h-[calc(100svh-128px)] lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="relative min-h-[62vh] bg-map-water lg:min-h-0">
           {view === "map" ? (
-            <IndiaMap aggregates={aggregates} facilities={facilities} capability={capability} level="state" onRegionClick={(name) => setRegion(name)} onCapabilityChange={setCapability} />
+            <IndiaMap aggregates={aggregates} facilities={facilities} capability={capability} level="state" onRegionClick={(name) => { setRegion(name); setRegionQuery(name); }} />
           ) : (
             <ListFallback facilities={facilities} capability={capability} />
           )}
@@ -140,8 +196,10 @@ function buildLocalRegionSummary(
   aggregates: AggregateRowWithCI[],
   facilities: FacilityPoint[],
 ): RegionSummary {
-  const aggregate = aggregates.find((row) => row.region_name === region);
-  const regionFacilities = facilities.filter((facility) => facility.state === region);
+  const resolvedRegion = resolveRegionName(region, aggregates, facilities) ?? region;
+  const regionLower = normalizeRegion(resolvedRegion);
+  const aggregate = aggregates.find((row) => normalizeRegion(row.region_name) === regionLower);
+  const regionFacilities = facilities.filter((facility) => normalizeRegion(facility.state) === regionLower || normalizeRegion(facility.city) === regionLower);
   const topFacilities: FacilityHit[] = regionFacilities
     .slice()
     .sort((a, b) => (b.trust_score ?? 0) - (a.trust_score ?? 0))
@@ -164,7 +222,7 @@ function buildLocalRegionSummary(
     }));
 
   return {
-    region,
+    region: resolvedRegion,
     capability,
     claimed_count: aggregate?.claimed_count ?? regionFacilities.length,
     verified_count: aggregate?.verified_count ?? regionFacilities.filter((facility) => facility.trust_status === "Verified").length,
@@ -172,13 +230,54 @@ function buildLocalRegionSummary(
     contradiction_count: regionFacilities.filter((facility) => facility.has_contradiction).length,
     ci_lower: aggregate?.ci_lower ?? null,
     ci_upper: aggregate?.ci_upper ?? null,
-    verification_rate: aggregate?.verification_rate ?? null,
+    verification_rate: aggregate?.verification_rate ?? (regionFacilities.length ? regionFacilities.filter((facility) => facility.trust_status === "Verified").length / regionFacilities.length : null),
     top_facilities: topFacilities,
   };
 }
 
-function Toggle({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
-  return <button onClick={() => onChange(!on)} role="switch" aria-checked={on} className={cn("inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium", on ? "border-primary/40 bg-primary-soft text-primary-soft-foreground" : "hairline bg-surface text-muted-foreground")}><span className={cn("h-1.5 w-1.5 rounded-full", on ? "bg-primary" : "bg-muted-foreground/40")} />{label}</button>;
+function resolveRegionName(query: string, aggregates: AggregateRowWithCI[], facilities: FacilityPoint[]): string | null {
+  const normalized = normalizeRegion(query);
+  if (!normalized) return null;
+  const names = regionNameOptions(aggregates, facilities);
+  return (
+    names.find((name) => normalizeRegion(name) === normalized) ??
+    names.find((name) => normalizeRegion(name).startsWith(normalized)) ??
+    names.find((name) => normalizeRegion(name).includes(normalized)) ??
+    null
+  );
+}
+
+function findRegionSuggestions(query: string, aggregates: AggregateRowWithCI[], facilities: FacilityPoint[]): string[] {
+  const normalized = normalizeRegion(query);
+  if (normalized.length < 2) return [];
+  const names = regionNameOptions(aggregates, facilities);
+  return names
+    .filter((name) => normalizeRegion(name).includes(normalized))
+    .sort((a, b) => {
+      const aStarts = normalizeRegion(a).startsWith(normalized);
+      const bStarts = normalizeRegion(b).startsWith(normalized);
+      if (aStarts !== bStarts) return aStarts ? -1 : 1;
+      return a.localeCompare(b);
+    })
+    .slice(0, 6);
+}
+
+function regionNameOptions(aggregates: AggregateRowWithCI[], facilities: FacilityPoint[]): string[] {
+  const names = new Set<string>();
+  for (const row of aggregates) names.add(row.region_name);
+  for (const facility of facilities) {
+    if (facility.state) names.add(facility.state);
+    if (facility.city) names.add(facility.city);
+  }
+  return Array.from(names);
+}
+
+function normalizeRegion(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function Toggle({ label, hint, on, onChange }: { label: string; hint: string; on: boolean; onChange: (v: boolean) => void }) {
+  return <Hint text={hint}><button onClick={() => onChange(!on)} role="switch" aria-checked={on} className={cn("inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium", on ? "border-primary/40 bg-primary-soft text-primary-soft-foreground" : "hairline bg-surface text-muted-foreground")}><span className={cn("h-1.5 w-1.5 rounded-full", on ? "bg-primary" : "bg-muted-foreground/40")} />{label}</button></Hint>;
 }
 
 function ListFallback({ facilities, capability }: { facilities: FacilityPoint[]; capability: string }) {

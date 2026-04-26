@@ -42,16 +42,29 @@ def fetch_trace(run_id: str) -> dict:
 
     client = MlflowClient()
     try:
+        trace = _first_trace_record(
+            mlflow.search_traces(
+                filter_string=f"request_id = '{run_id}'",
+                max_results=1,
+            )
+        )
+        if trace:
+            return trace
+    except Exception:
+        pass
+
+    try:
         run = client.get_run(run_id)
         tags = run.data.tags
         # MLflow traces are attached via the tracing API; retrieve via search_traces
-        traces = mlflow.search_traces(
+        trace = _first_trace_record(
+            mlflow.search_traces(
             filter_string=f"request_id = '{run_id}'",
             max_results=1,
+            )
         )
-        if traces is not None and len(traces) > 0:
-            trace = traces[0]
-            return trace.to_dict() if hasattr(trace, "to_dict") else {}
+        if trace:
+            return trace
         return {"run_id": run_id, "tags": dict(tags)}
     except Exception:
         return {
@@ -119,3 +132,15 @@ def recent_traces(limit: int = 10) -> list[dict]:
     seen = {item["id"] for item in local_rows}
     merged = local_rows + [item for item in result if item.get("id") not in seen]
     return merged[:limit]
+
+
+def _first_trace_record(traces: Any) -> dict[str, Any] | None:
+    if traces is None or len(traces) == 0:
+        return None
+    if hasattr(traces, "to_dict"):
+        records = traces.to_dict("records")
+        return records[0] if records else None
+    trace = traces[0]
+    if hasattr(trace, "to_dict"):
+        return trace.to_dict()
+    return trace if isinstance(trace, dict) else None

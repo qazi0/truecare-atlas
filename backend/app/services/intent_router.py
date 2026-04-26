@@ -106,6 +106,7 @@ async def route_intent_search(query: str, mode: str = "fast") -> IntentSearchRes
     origin: PlaceResolution | None = None
     if parsed.place:
         origin = resolve_place(parsed.place)
+    unresolved_nearby_origin = parsed.intent == "nearby_facility_search" and bool(parsed.place) and origin is None
 
     results = []
     region_summary: RegionSummary | None = None
@@ -121,6 +122,8 @@ async def route_intent_search(query: str, mode: str = "fast") -> IntentSearchRes
             filters=filters,
             k=20,
         )
+    elif unresolved_nearby_origin:
+        results = []
     elif parsed.intent == "coverage_gap_search":
         region = origin.state if origin and origin.state else parsed.place
         if region:
@@ -136,7 +139,7 @@ async def route_intent_search(query: str, mode: str = "fast") -> IntentSearchRes
         if parsed.place and results:
             place_l = parsed.place.lower()
             results = [r for r in results if place_l in " ".join([r.city or "", r.state or "", r.pincode or ""]).lower()] or results
-    if not results and parsed.query:
+    if not results and parsed.query and not unresolved_nearby_origin:
         results = query_facilities_by_text(parsed.query, k=20)
 
     evidence = _evidence_preview(results[:5])
@@ -193,6 +196,15 @@ def _extract_place(ql: str, capability: str | None) -> str | None:
     for state in STATE_NAMES:
         if re.search(rf"\b{re.escape(state)}\b", ql):
             return state.title()
+    bounded = re.search(
+        r"\bwithin\s+\d+(?:\.\d+)?\s*(?:km|kilometers?)\s+(?:of|from|near|around|in)?\s*([a-z][a-z\s]+)",
+        ql,
+    )
+    if bounded:
+        tail = re.split(r"\b(?:with|for|that|who|which|and)\b", bounded.group(1), maxsplit=1)[0]
+        candidate = _clean_place_candidate(tail, capability)
+        if candidate:
+            return candidate
     for marker in [" near ", " nearest ", " around ", " from ", " in ", " at "]:
         if marker not in f" {ql} ":
             continue
@@ -210,7 +222,8 @@ def _clean_place_candidate(text: str, capability: str | None) -> str:
     cleaned = text
     for phrase in list(CAPABILITY_ALIASES) + list(NEARBY_WORDS) + list(COVERAGE_WORDS) + list(REVIEW_WORDS):
         cleaned = re.sub(rf"\b{re.escape(phrase)}\b", " ", cleaned)
-    cleaned = re.sub(r"\b(?:find|show|map|facilities|facility|hospital|hospitals|claims|care|verified|high trust|trusted|mother|needs)\b", " ", cleaned)
+    cleaned = re.sub(r"\b(?:find|show|map|facilities|facility|hospital|hospitals|claims|care|verified|high trust|trusted|mother|needs|of|within|km|kilometer|kilometers)\b", " ", cleaned)
+    cleaned = re.sub(r"\b\d+(?:\.\d+)?\s*km\b", " ", cleaned)
     cleaned = re.sub(r"[^a-z0-9\s]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if capability:

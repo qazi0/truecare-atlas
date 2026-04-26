@@ -67,6 +67,7 @@ def auto_run_reviews(limit: int = Query(default=50, ge=1, le=100)) -> AutoReview
     for item in candidates:
         bucket = _bucket_for_task(item["severity"], item["reason"], item.get("evidence_for", []), item.get("evidence_against", []))
         result = AutoReviewResult(
+            task_id=item["id"],
             facility_id=item["facility_id"],
             facility_name=item.get("facility_name"),
             bucket=bucket,

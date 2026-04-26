@@ -6,7 +6,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Activity, AlertOctagon, Brain, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, FileText, Filter, Loader2, Map, MapPin, Plus, Search, ShieldCheck, Zap } from "lucide-react";
-import { AppShell, CapabilityBadge, EmptyState, StatusBadge, TrustRing } from "@/components/atlas/primitives";
+import { AppShell, CapabilityBadge, EmptyState, Hint, StatusBadge, TrustRing } from "@/components/atlas/primitives";
 import { Button } from "@/components/ui/button";
 import { EvidenceLedgerButton } from "@/components/evidence-ledger";
 import { activeEvidenceRows, addToShortlist, capabilityKeyFromQuery, capabilityLabel, deriveStatus, formatLocation, trustFlagTitle } from "@/lib/atlas";
@@ -233,8 +233,12 @@ function CommandContent() {
               <span className="font-mono text-[11px] text-muted-foreground">{results.length} results</span>
             </div>
             <div className="hidden rounded-md border hairline bg-surface-muted p-0.5 text-[12px] md:inline-flex">
-              <ModeLink q={query} mode="fast" active={mode === "fast"} icon={Zap} />
-              <ModeLink q={query} mode="deep" active={mode === "deep"} icon={Brain} />
+              <Hint text="Fast Search gives immediate ranked matches by understanding the care need, location, and capability.">
+                <ModeLink q={query} mode="fast" active={mode === "fast"} icon={Zap} />
+              </Hint>
+              <Hint text="Deep Reasoning uses an AI agent workflow to inspect evidence, weigh tradeoffs, and produce a fuller answer.">
+                <ModeLink q={query} mode="deep" active={mode === "deep"} icon={Brain} />
+              </Hint>
             </div>
             <Button size="sm" variant="outline" className="hidden h-9 md:inline-flex"><Filter className="h-3.5 w-3.5" /> Filters</Button>
           </div>
@@ -338,7 +342,7 @@ function Inspector({ facility, validation, validationLoading, traceId, onExport,
         </div>
         <div className="mt-3 flex flex-wrap gap-2"><StatusBadge status={status} /><span className="font-mono text-[11px] text-muted-foreground">id {facility.facility_id}</span></div>
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <Button size="sm" className="h-8 text-[12px]" onClick={() => onShortlist(facility.facility_id)}><Plus className="h-3.5 w-3.5" /> Add</Button>
+          <Button size="sm" className="h-8 text-[12px]" onClick={() => onShortlist(facility.facility_id)}><Plus className="h-3.5 w-3.5" /> Add to shortlist</Button>
           <Button size="sm" variant="outline" disabled={validationLoading || Boolean(validation)} className="h-8 text-[12px] disabled:opacity-70">{validationLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />} {validation ? "Validated" : "Validate"}</Button>
           <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => onExport(facility.facility_id)}><Download className="h-3.5 w-3.5" /> Export</Button>
           <Link href={traceId ? `/trace/${traceId}` : `/facility/${facility.facility_id}`}><Button size="sm" variant="outline" className="h-8 w-full text-[12px]"><ExternalLink className="h-3.5 w-3.5" /> Trace</Button></Link>
@@ -477,19 +481,18 @@ function InspectorSkeleton() {
 }
 
 function FormattedSummary({ text }: { text: string }) {
-  const normalized = text
-    .replace(/\s+/g, " ")
-    .replace(/(?<!\d)([.!?])\s+(?=[A-Z][a-z])/g, "$1\n")
-    .replace(/\s+(\d+\.\s+(?=[A-Z]))/g, "\n$1")
-    .trim();
+  const normalized = text.replace(/\s+/g, " ").replace(/\s*(\d+)\.\s+/g, "\n$1. ").trim();
   const lines = normalized.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const numbered = lines.filter((line) => /^\d+\.\s+/.test(line));
+  const intro = lines.filter((line) => !/^\d+\.\s+/.test(line));
   return (
     <div className="space-y-1 leading-relaxed">
-      {lines.map((line, index) => (
-        <p key={`${line}-${index}`} className="max-w-4xl whitespace-normal">
-          {line}
-        </p>
-      ))}
+      {intro.map((line, index) => <p key={`${line}-${index}`} className="max-w-4xl whitespace-normal">{line}</p>)}
+      {numbered.length > 0 && (
+        <ol className="ml-4 list-decimal space-y-1">
+          {numbered.map((line, index) => <li key={`${line}-${index}`} className="pl-1">{line.replace(/^\d+\.\s+/, "")}</li>)}
+        </ol>
+      )}
     </div>
   );
 }
