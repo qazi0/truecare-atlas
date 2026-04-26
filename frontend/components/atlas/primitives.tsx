@@ -3,6 +3,7 @@
 /* eslint-disable react/no-unescaped-entities */
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Activity, AlertOctagon, CheckCircle2, ChevronRight, Database, ListChecks, Map, Search, ShieldCheck } from "lucide-react";
@@ -17,14 +18,22 @@ const NAV = [
   { to: "/data-health", label: "Data Health", icon: Activity },
 ];
 
+const TOP_NAV = NAV.filter((item) => item.to !== "/shortlist");
+
 export function Wordmark() {
   return (
-    <Link href="/" className="inline-flex items-center gap-2">
-      <span className="relative inline-flex h-6 w-6 items-center justify-center rounded-sm bg-primary text-primary-foreground">
-        <span className="font-mono text-[11px] font-bold">TC</span>
-        <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-trust ring-2 ring-background" />
+    <Link href="/" className="inline-flex items-center gap-2.5">
+      <span className="relative inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-primary/15 bg-white/95 shadow-sm ring-1 ring-white">
+        <Image
+          src="/logo.png"
+          alt=""
+          width={48}
+          height={48}
+          className="h-full w-full scale-[1.55] object-contain"
+          priority
+        />
       </span>
-      <span className="text-[15px] font-semibold tracking-tight">
+      <span className="text-[17px] font-semibold tracking-tight">
         TrueCare <span className="text-primary">Atlas</span>
       </span>
     </Link>
@@ -34,11 +43,13 @@ export function Wordmark() {
 export function AppShell({ children, topBarRight, hideRail = false }: { children: ReactNode; topBarRight?: ReactNode; hideRail?: boolean }) {
   return (
     <div className="min-h-screen w-full flex flex-col bg-background text-foreground">
-      <header className="sticky top-0 z-40 h-12 border-b hairline bg-background/90 backdrop-blur">
+      <header className="sticky top-0 z-40 h-16 border-b hairline bg-background/90 backdrop-blur">
         <div className="flex h-full items-center gap-4 px-4">
           <Wordmark />
           <div className="hidden md:block h-4 w-px bg-hairline" />
           <SystemStatus />
+          <HeaderTagline />
+          <HeaderNav />
           <div className="ml-auto flex items-center gap-3">{topBarRight}</div>
         </div>
       </header>
@@ -48,6 +59,39 @@ export function AppShell({ children, topBarRight, hideRail = false }: { children
       </div>
       <MobileBottomNav />
     </div>
+  );
+}
+
+function HeaderTagline() {
+  return (
+    <div className="ml-1 hidden items-center text-[10px] font-normal uppercase tracking-[0.24em] text-muted-foreground lg:flex">
+      Healthcare intelligence for planners who need proof
+    </div>
+  );
+}
+
+function HeaderNav() {
+  const pathname = usePathname();
+  return (
+    <nav aria-label="Primary" className="ml-auto hidden items-center gap-1 xl:flex">
+      {TOP_NAV.map((item) => {
+        const active = pathname.startsWith(item.to);
+        const Icon = item.icon;
+        return (
+          <Link
+            key={item.to}
+            href={item.to}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium transition",
+              active ? "bg-primary-soft text-primary" : "text-muted-foreground hover:bg-surface-muted hover:text-foreground",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 

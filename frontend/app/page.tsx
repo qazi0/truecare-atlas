@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Brain, Map as MapIcon, Search, Zap } from "lucide-react";
 import { AppShell, Metric } from "@/components/atlas/primitives";
@@ -61,14 +62,26 @@ export default function MissionControl() {
         </div>
 
         <div className="relative z-10 flex min-h-[calc(100svh-48px)] flex-col items-center justify-center px-4 py-8 md:-translate-y-6">
-          <div className="w-full max-w-3xl">
+          <div className="w-full max-w-4xl">
+            <div className="mb-5 flex justify-center">
+              <span className="inline-flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-primary/15 bg-white/95 shadow-sm ring-1 ring-white">
+                <Image
+                  src="/logo.png"
+                  alt=""
+                  width={96}
+                  height={96}
+                  className="h-full w-full scale-[1.45] object-contain"
+                  priority
+                />
+              </span>
+            </div>
             <div className="mb-5 flex items-center justify-center gap-2 text-[11px] font-mono text-muted-foreground">
               <span className="h-px w-6 bg-hairline" />
               MISSION CONTROL
               <span className="h-px w-6 bg-hairline" />
             </div>
-            <h1 className="text-center text-[34px] font-semibold leading-[1.05] tracking-tight md:text-[44px]">
-              Find the care claims <span className="text-primary">you can trust.</span>
+            <h1 className="text-center text-[34px] font-semibold leading-[1.05] tracking-tight md:whitespace-nowrap md:text-[40px] lg:text-[44px]">
+              Know who can deliver <span className="text-primary">life-saving care.</span>
             </h1>
             <p className="mx-auto mt-4 max-w-4xl text-center text-[14px] text-muted-foreground md:whitespace-nowrap md:text-[15px]">
               Audit healthcare facility records to identify verified capabilities, contradictions, and regional care gaps.

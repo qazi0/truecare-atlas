@@ -28,6 +28,9 @@ const CAPABILITY_OPTIONS = [
   { key: "has_cardiac_cath_lab", label: "Cath Lab" },
 ];
 
+const FACILITY_DOT_MIN_ZOOM = 6.6;
+const CITY_DOT_MAX_ZOOM = 7.2;
+
 const STATE_CENTROIDS: Record<string, [number, number]> = {
   "Andhra Pradesh": [79.74, 15.91],
   "Arunachal Pradesh": [94.73, 28.22],
@@ -379,18 +382,18 @@ export function IndiaMap({
             12, 6,
           ],
           "circle-color": ["get", "color"],
-          // Fade in facility dots starting at zoom 5
+          // Keep individual dots out of the national view; they become useful only at regional zoom.
           "circle-opacity": [
             "interpolate", ["linear"], ["zoom"],
-            3, 0.45,
-            5, 0.55,
-            6, 0.72,
+            5.8, 0,
+            6.4, 0,
+            6.9, 0.72,
             10, 0.85,
           ],
           "circle-stroke-color": "#fff",
           "circle-stroke-width": [
             "interpolate", ["linear"], ["zoom"],
-            5, 0,
+            6.4, 0,
             8, 0.5,
             12, 1,
           ],
@@ -597,7 +600,7 @@ export function IndiaMap({
       <div className="relative flex-1 min-h-[420px] overflow-hidden bg-map-water">
         <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
         <div className="pointer-events-none absolute inset-0 z-10">
-          {overlay.zoom < 7.5 && overlay.cities.map((city) => (
+          {overlay.zoom < CITY_DOT_MAX_ZOOM && overlay.cities.map((city) => (
             <div
               key={city.key}
               className="absolute -translate-x-1/2 -translate-y-1/2"
@@ -610,7 +613,7 @@ export function IndiaMap({
               </span>
             </div>
           ))}
-          {overlay.facilities.map((facility) => (
+          {overlay.zoom >= FACILITY_DOT_MIN_ZOOM && overlay.facilities.map((facility) => (
             <button
               key={facility.key}
               type="button"
