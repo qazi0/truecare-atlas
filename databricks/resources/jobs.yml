@@ -28,3 +28,10 @@ resources:
             - task_key: score
           notebook_task:
             notebook_path: ../src/jobs/aggregate.sql
+
+        - task_key: vs_prep
+          description: "Phase 4b: Materialize VS source table (capabilities + trust, CDF enabled)"
+          depends_on:
+            - task_key: aggregate
+          notebook_task:
+            notebook_path: ../src/jobs/vs_prep.sql

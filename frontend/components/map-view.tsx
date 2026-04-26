@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { IndiaMap } from "@/components/india-map";
-import type { AggregateRow, AggregateLevel } from "@/lib/types";
+import type { AggregateRow, AggregateLevel, FacilityPoint } from "@/lib/types";
 
 export function MapView() {
   const [aggregates, setAggregates] = useState<AggregateRow[]>([]);
+  const [facilities, setFacilities] = useState<FacilityPoint[]>([]);
   const [capability, setCapability] = useState("has_nicu");
   const [level] = useState<AggregateLevel>("state");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const facilitiesFetched = useRef(false);
 
   const fetchAggregates = useCallback(
     async (cap: string, lvl: AggregateLevel) => {
@@ -34,6 +36,16 @@ export function MapView() {
   useEffect(() => {
     fetchAggregates(capability, level);
   }, [capability, level, fetchAggregates]);
+
+  // Fetch facility points once (they don't change with capability)
+  useEffect(() => {
+    if (facilitiesFetched.current) return;
+    facilitiesFetched.current = true;
+    fetch("/api/map/facilities")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setFacilities(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="flex flex-col h-full relative">
@@ -64,6 +76,7 @@ export function MapView() {
 
       <IndiaMap
         aggregates={aggregates}
+        facilities={facilities}
         capability={capability}
         level={level}
         onRegionClick={() => {}}

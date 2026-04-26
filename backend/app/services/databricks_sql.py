@@ -240,18 +240,20 @@ def query_facilities_by_capability(
 
 
 def query_facilities_by_text(query: str, k: int = 20) -> list[FacilityHit]:
-    """Simple text search across name, city, state, capabilities_caption."""
-    sql = """
+    """Text search — splits query into words, each must match at least one column."""
+    words = [w for w in query.split() if len(w) >= 2]
+    if not words:
+        return []
+    searchable = "LOWER(CONCAT(COALESCE(t.name,''), ' ', COALESCE(t.city,''), ' ', COALESCE(t.state_canon,''), ' ', COALESCE(t.capabilities_caption,'')))"
+    word_clauses = [f"{searchable} LIKE LOWER(CONCAT('%', ?, '%'))" for _ in words]
+    sql = f"""
         SELECT t.*
         FROM workspace.default.gold_facility_trust t
-        WHERE LOWER(t.name) LIKE LOWER(CONCAT('%', ?, '%'))
-           OR LOWER(t.city) LIKE LOWER(CONCAT('%', ?, '%'))
-           OR LOWER(t.state_canon) LIKE LOWER(CONCAT('%', ?, '%'))
-           OR LOWER(t.capabilities_caption) LIKE LOWER(CONCAT('%', ?, '%'))
+        WHERE {' AND '.join(word_clauses)}
         ORDER BY t.trust_score DESC
-        LIMIT ?
+        LIMIT {int(k)}
     """
-    rows = _execute(sql, [query, query, query, query, k])
+    rows = _execute(sql, words)
     return [_row_to_facility_hit(r) for r in rows]
 
 
@@ -442,6 +444,32 @@ def query_facilities_for_export(facility_ids: list[str]) -> list[dict]:
         WHERE t.facility_id IN ({placeholders})
     """
     return _execute(sql, facility_ids)
+
+
+def query_map_facilities() -> list[dict]:
+    """Lightweight facility list for map markers — only id, name, lat/lng, trust, type."""
+    sql = """
+        SELECT facility_id, name, latitude, longitude, trust_score,
+               trust_score_bucket, facility_type_id, state_canon, city
+        FROM workspace.default.gold_facility_trust
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+    """
+    rows = _execute(sql, [])
+    return [
+        {
+            "facility_id": r["facility_id"],
+            "name": _clean_str(r["name"]) or "",
+            "lat": float(r["latitude"]),
+            "lng": float(r["longitude"]),
+            "trust_score": r.get("trust_score"),
+            "trust_bucket": r.get("trust_score_bucket", "unknown"),
+            "type": r.get("facility_type_id"),
+            "state": _clean_str(r.get("state_canon")),
+            "city": _clean_str(r.get("city")),
+        }
+        for r in rows
+        if r.get("latitude") is not None and r.get("longitude") is not None
+    ]
 
 
 def _pincode_col(capability: str) -> str:

@@ -4,10 +4,11 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { Badge } from "@/components/ui/badge";
-import type { AggregateRow, AggregateLevel } from "@/lib/types";
+import type { AggregateRow, AggregateLevel, FacilityPoint } from "@/lib/types";
 
 interface IndiaMapProps {
   aggregates: AggregateRow[];
+  facilities?: FacilityPoint[];
   capability: string;
   level: AggregateLevel;
   onRegionClick: (name: string, level: AggregateLevel) => void;
@@ -66,6 +67,37 @@ const STATE_CENTROIDS: Record<string, [number, number]> = {
   "Puducherry": [79.81, 11.94],
 };
 
+function bucketColor(bucket: string): string {
+  if (bucket === "high") return "#10b981";
+  if (bucket === "mid") return "#fbbf24";
+  return "#ef4444";
+}
+
+function buildFacilityGeoJSON(
+  pts: FacilityPoint[]
+): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: pts.map((p) => ({
+      type: "Feature" as const,
+      geometry: {
+        type: "Point" as const,
+        coordinates: [p.lng, p.lat],
+      },
+      properties: {
+        facility_id: p.facility_id,
+        name: p.name,
+        trust_score: p.trust_score,
+        trust_bucket: p.trust_bucket ?? "unknown",
+        type: p.type ?? "",
+        state: p.state ?? "",
+        city: p.city ?? "",
+        color: bucketColor(p.trust_bucket),
+      },
+    })),
+  };
+}
+
 function verificationRatio(verified: number, claimed: number): number {
   return claimed > 0 ? verified / claimed : 0;
 }
@@ -78,6 +110,7 @@ function ratioColor(ratio: number): string {
 
 export function IndiaMap({
   aggregates,
+  facilities = [],
   capability,
   level,
   onRegionClick,
@@ -141,7 +174,7 @@ export function IndiaMap({
       center: [80, 22],
       zoom: 4,
       minZoom: 3,
-      maxZoom: 10,
+      maxZoom: 14,
       attributionControl: false,
     });
     mapRef.current = map;
@@ -164,7 +197,13 @@ export function IndiaMap({
         paint: {
           "circle-radius": ["get", "radius"],
           "circle-color": ["get", "color"],
-          "circle-opacity": 0.75,
+          // Fade out aggregate circles as user zooms in past 7
+          "circle-opacity": [
+            "interpolate", ["linear"], ["zoom"],
+            3, 0.75,
+            7, 0.75,
+            9, 0,
+          ],
           "circle-stroke-color": "#fff",
           "circle-stroke-width": 1.5,
         },
@@ -185,6 +224,48 @@ export function IndiaMap({
           "text-color": "#374151",
           "text-halo-color": "#fff",
           "text-halo-width": 1.5,
+          "text-opacity": [
+            "interpolate", ["linear"], ["zoom"],
+            3, 1,
+            7, 1,
+            9, 0,
+          ],
+        },
+      });
+
+      // --- Facility dots layer ---
+      map.addSource("facilities", {
+        type: "geojson",
+        data: buildFacilityGeoJSON(facilities),
+      });
+
+      map.addLayer({
+        id: "facility-dots",
+        type: "circle",
+        source: "facilities",
+        paint: {
+          "circle-radius": [
+            "interpolate", ["linear"], ["zoom"],
+            5, 2,
+            8, 3.5,
+            12, 6,
+          ],
+          "circle-color": ["get", "color"],
+          // Fade in facility dots starting at zoom 5
+          "circle-opacity": [
+            "interpolate", ["linear"], ["zoom"],
+            4, 0,
+            5, 0,
+            6, 0.7,
+            10, 0.85,
+          ],
+          "circle-stroke-color": "#fff",
+          "circle-stroke-width": [
+            "interpolate", ["linear"], ["zoom"],
+            5, 0,
+            8, 0.5,
+            12, 1,
+          ],
         },
       });
     });
@@ -232,6 +313,43 @@ export function IndiaMap({
       }
     });
 
+    // --- Facility dot interactions ---
+    map.on("mouseenter", "facility-dots", (e) => {
+      map.getCanvas().style.cursor = "pointer";
+      const f = e.features?.[0];
+      if (!f || !f.properties) return;
+      const p = f.properties;
+      const score =
+        p.trust_score != null ? Math.round(Number(p.trust_score)) : "N/A";
+      popup
+        .setLngLat(
+          (f.geometry as GeoJSON.Point).coordinates as [number, number]
+        )
+        .setHTML(
+          `<div style="font-family:system-ui;font-size:12px;line-height:1.5;min-width:140px">` +
+            `<strong>${p.name}</strong><br/>` +
+            `<span style="color:${p.color};font-weight:600">Trust ${score}</span>` +
+            (p.city ? ` &middot; ${p.city}` : "") +
+            (p.state ? `<br/><span style="color:#6b7280">${p.state}</span>` : "") +
+            (p.type ? `<br/><span style="color:#6b7280;font-size:11px">${p.type}</span>` : "") +
+            `</div>`
+        )
+        .addTo(map);
+    });
+
+    map.on("mouseleave", "facility-dots", () => {
+      map.getCanvas().style.cursor = "";
+      popup.remove();
+    });
+
+    map.on("click", "facility-dots", (e) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      const id = f.properties.facility_id;
+      // Navigate to facility detail page
+      window.open(`/facility/${id}`, "_blank");
+    });
+
     return () => {
       popup.remove();
       map.remove();
@@ -259,6 +377,25 @@ export function IndiaMap({
       map.once("load", updateSource);
     }
   }, [aggregates, buildGeoJSON]);
+
+  // Update facility points when data arrives
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || facilities.length === 0) return;
+
+    const updateFacilities = () => {
+      const source = map.getSource("facilities") as mapboxgl.GeoJSONSource | undefined;
+      if (source) {
+        source.setData(buildFacilityGeoJSON(facilities));
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      updateFacilities();
+    } else {
+      map.once("load", updateFacilities);
+    }
+  }, [facilities]);
 
   return (
     <div className="flex flex-col h-full">

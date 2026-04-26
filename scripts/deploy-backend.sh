@@ -3,7 +3,7 @@
 # Usage: ./scripts/deploy-backend.sh
 set -euo pipefail
 
-PROFILE="siraj-workspace"
+PROFILE="sj-wksp"
 APP_NAME="trustmap-india"
 BACKEND_DIR="$(cd "$(dirname "$0")/../backend" && pwd)"
 

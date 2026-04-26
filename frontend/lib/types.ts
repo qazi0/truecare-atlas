@@ -134,6 +134,18 @@ export interface SSEEvent {
   payload: Record<string, unknown>;
 }
 
+export interface FacilityPoint {
+  facility_id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  trust_score: number | null;
+  trust_bucket: string;
+  type: string | null;
+  state: string | null;
+  city: string | null;
+}
+
 // Frontend-only derived state
 export interface StreamStep {
   step_index: number;

@@ -13,10 +13,10 @@ import { useStream } from "@/hooks/use-stream";
 import type { FacilityHit, FacilityFull } from "@/lib/types";
 
 const DEMO_QUERIES = [
-  "hospitals in Bihar",
-  "oncology Maharashtra",
-  "dialysis Tamil Nadu",
-  "Agasthiyar",
+  "NICU Bihar",
+  "oncology Mumbai",
+  "dialysis Chennai",
+  "cardiac surgery Delhi",
   "maternity Kerala",
 ];
 

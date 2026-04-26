@@ -8,9 +8,9 @@ def _is_databricks_app() -> bool:
 
 
 class Settings(BaseSettings):
-    databricks_host: str = "https://dbc-842dd1eb-38c2.cloud.databricks.com"
-    databricks_profile: str = "" if _is_databricks_app() else "siraj-workspace"
-    warehouse_id: str = "7180e1001ad3c807"
+    databricks_host: str = "https://dbc-d744432c-1635.cloud.databricks.com"
+    databricks_profile: str = "" if _is_databricks_app() else "sj-wksp"
+    warehouse_id: str = "38034fae49ef0da4"
     catalog: str = "workspace"
     schema_name: str = "default"
     chat_model: str = "databricks-meta-llama-3-3-70b-instruct"

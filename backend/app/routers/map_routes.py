@@ -1,9 +1,13 @@
-"""GET /api/map/aggregates — returns capability rollups for choropleth map."""
+"""Map endpoints — aggregates for choropleth + lightweight facility points."""
 
 from fastapi import APIRouter, Query
 
 from app.schemas import AggregateLevel, AggregateRow, AggregateRowWithCI
-from app.services.databricks_sql import query_aggregates, query_aggregates_with_ci
+from app.services.databricks_sql import (
+    query_aggregates,
+    query_aggregates_with_ci,
+    query_map_facilities,
+)
 
 router = APIRouter(tags=["map"])
 
@@ -14,6 +18,12 @@ def get_map_aggregates(
     level: AggregateLevel = Query(default=AggregateLevel.STATE, description="Geographic level"),
 ) -> list[AggregateRow]:
     return query_aggregates(level=level, capability=capability)
+
+
+@router.get("/map/facilities")
+def get_map_facilities() -> list[dict]:
+    """All facility points for map markers — lightweight payload."""
+    return query_map_facilities()
 
 
 @router.get("/map/aggregates/ci", response_model=list[AggregateRowWithCI])

@@ -31,6 +31,11 @@ function scoreColor(score: number | null): string {
   return "var(--color-alert)";
 }
 
+interface CapWithEvidence {
+  label: string;
+  evidence: string | null;
+}
+
 function trueCapabilities(facility: FacilityHit): string[] {
   if (!facility.capabilities) return [];
   const caps = facility.capabilities;
@@ -43,12 +48,31 @@ function trueCapabilities(facility: FacilityHit): string[] {
     .slice(0, 5);
 }
 
+function capsWithEvidence(facility: FacilityHit): CapWithEvidence[] {
+  if (!facility.capabilities) return [];
+  const caps = facility.capabilities;
+  return Object.entries(CAPABILITY_LABELS)
+    .filter(([key]) => {
+      const cap = caps[key as keyof FacilityCapabilities];
+      return cap && typeof cap === "object" && "value" in cap && cap.evidence_quote;
+    })
+    .map(([key, label]) => {
+      const cap = caps[key as keyof FacilityCapabilities];
+      return {
+        label,
+        evidence: typeof cap === "object" && "evidence_quote" in cap ? cap.evidence_quote : null,
+      };
+    })
+    .slice(0, 3);
+}
+
 export function FacilityCard({
   facility,
   isSelected,
   onSelect,
 }: FacilityCardProps) {
   const trueCaps = trueCapabilities(facility);
+  const evidence = capsWithEvidence(facility);
   const location = [facility.city, facility.state].filter(Boolean).join(", ");
 
   return (
@@ -114,6 +138,21 @@ export function FacilityCard({
               >
                 {cap}
               </Badge>
+            ))}
+          </div>
+        )}
+        {evidence.length > 0 && (
+          <div className="flex flex-col gap-0.5 mt-0.5">
+            {evidence.map((e) => (
+              <p
+                key={e.label}
+                className="text-[10px] text-text-muted italic pl-2 border-l-2 border-border truncate"
+                title={`${e.label}: ${e.evidence}`}
+              >
+                <span className="font-medium not-italic text-text/70">{e.label}</span>
+                {" — "}
+                &ldquo;{e.evidence}&rdquo;
+              </p>
             ))}
           </div>
         )}

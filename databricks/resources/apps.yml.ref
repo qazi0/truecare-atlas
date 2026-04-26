@@ -1,0 +1,31 @@
+resources:
+  apps:
+    trustmap_india:
+      name: trustmap-india
+      source_code_path: /Workspace/Users/fullbridgerectifier@gmail.com/trustmap-backend
+      config:
+        command:
+          - python
+          - -m
+          - app.main
+        env:
+          - name: DATABRICKS_WAREHOUSE_ID
+            value_from: sql-warehouse
+          - name: TM_WAREHOUSE_ID
+            value_from: sql-warehouse
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: "38034fae49ef0da4"
+            permission: CAN_USE
+        - name: serving-endpoint
+          serving_endpoint:
+            name: databricks-meta-llama-3-3-70b-instruct
+            permission: CAN_QUERY
+        - name: vector-search-endpoint
+          serving_endpoint:
+            name: tm_endpoint
+            permission: CAN_QUERY
+      permissions:
+        - user_name: fullbridgerectifier@gmail.com
+          level: CAN_MANAGE
