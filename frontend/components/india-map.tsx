@@ -150,22 +150,6 @@ function ratioColor(ratio: number): string {
   return "#ef4444";
 }
 
-function deficitSeverity(verified: number, claimed: number): "critical" | "high" | "moderate" | "covered" {
-  const rate = verificationRatio(verified, claimed);
-  if (claimed === 0 || verified === 0) return "critical";
-  if (rate < 0.2) return "high";
-  if (rate < 0.5) return "moderate";
-  return "covered";
-}
-
-function deficitColor(verified: number, claimed: number): string {
-  const severity = deficitSeverity(verified, claimed);
-  if (severity === "critical") return "#dc2626";
-  if (severity === "high") return "#f97316";
-  if (severity === "moderate") return "#fbbf24";
-  return "#2f8f5b";
-}
-
 export function IndiaMap({
   aggregates,
   facilities = [],
@@ -212,8 +196,7 @@ export function IndiaMap({
               claimed: row.claimed_count,
               verified: row.verified_count,
               ratio,
-              color: modeRef.current === "deficit" ? deficitColor(row.verified_count, row.claimed_count) : ratioColor(ratio),
-              severity: deficitSeverity(row.verified_count, row.claimed_count),
+              color: modeRef.current === "deficit" ? "#dc2626" : ratioColor(ratio),
               radius: Math.max(8, Math.min(35, Math.sqrt(row.claimed_count) * 3)),
               per_100k: row.per_100k ?? 0,
               level: row.region_level,
@@ -234,6 +217,7 @@ export function IndiaMap({
 
   useEffect(() => {
     modeRef.current = mode;
+    if (mode === "deficit") activeFacilityPopupRef.current = null;
   }, [mode]);
 
   const updateOverlay = useCallback(() => {
@@ -464,9 +448,9 @@ export function IndiaMap({
           `<div style="font-family:system-ui;font-size:12px;line-height:1.5;min-width:120px">` +
             `<strong>${p.name}</strong><br/>` +
             (modeRef.current === "deficit"
-              ? `<span style="color:${p.color};font-weight:600">${String(p.severity).replace(/^./, (c) => c.toUpperCase())}</span> deficit<br/>`
+              ? `<span style="color:${p.color};font-weight:600">Capability absent</span><br/>No ${CAPABILITY_OPTIONS.find((o) => o.key === capabilityRef.current)?.label ?? capabilityRef.current} records found`
               : `<span style="color:${p.color};font-weight:600">${pct}%</span> verified<br/>`) +
-            `${p.verified}/${p.claimed} verified` +
+            (modeRef.current === "deficit" ? "" : `${p.verified}/${p.claimed} verified`) +
             (p.per_100k > 0
               ? `<br/><span style="color:#6b7280">${Number(p.per_100k).toFixed(1)}/100k pop.</span>`
               : "") +
@@ -611,10 +595,7 @@ export function IndiaMap({
         </span>
         {mode === "deficit" ? (
           <span className="flex items-center gap-3">
-            <LegendDot color="#dc2626" label="Critical" />
-            <LegendDot color="#f97316" label="High" />
-            <LegendDot color="#fbbf24" label="Moderate" />
-            <LegendDot color="#2f8f5b" label="Covered" />
+            <LegendDot color="#dc2626" label="Capability absent" />
           </span>
         ) : (
           <span className="flex items-center gap-3">
@@ -624,7 +605,7 @@ export function IndiaMap({
           </span>
         )}
         <span className="text-xs text-text-muted ml-auto font-mono tabular-nums">
-          {totalVerified}/{totalClaimed} verified nationally
+          {mode === "deficit" ? `${aggregates.length} regions missing capability` : `${totalVerified}/${totalClaimed} verified nationally`}
         </span>
       </div>
 
@@ -632,7 +613,7 @@ export function IndiaMap({
       <div className="relative flex-1 min-h-[420px] overflow-hidden bg-map-water">
         <div ref={mapContainer} className="absolute inset-0 h-full w-full" />
         <div className="pointer-events-none absolute inset-0 z-10">
-          {overlay.zoom < CITY_DOT_MAX_ZOOM && overlay.cities.map((city) => (
+          {mode !== "deficit" && overlay.zoom < CITY_DOT_MAX_ZOOM && overlay.cities.map((city) => (
             <div
               key={city.key}
               className="absolute -translate-x-1/2 -translate-y-1/2"
@@ -646,7 +627,7 @@ export function IndiaMap({
             </div>
           ))}
         </div>
-        {selectedFacility && (
+        {mode !== "deficit" && selectedFacility && (
           <FacilityInfoCard
             facility={selectedFacility}
             capability={capability}

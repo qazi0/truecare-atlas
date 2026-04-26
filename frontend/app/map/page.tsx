@@ -62,9 +62,26 @@ function MapContent() {
     setSummary(buildLocalRegionSummary(region, capability, nextAggregates, nextFacilities));
   }, [capability, region, showReview, verifiedOnly]);
 
+  const national = useMemo(() => aggregates.reduce((acc, row) => ({
+    claimed: acc.claimed + row.claimed_count,
+    verified: acc.verified + row.verified_count,
+    absentRegions: acc.absentRegions + (row.claimed_count === 0 ? 1 : 0),
+    coveredRegions: acc.coveredRegions + (row.verified_count > 0 ? 1 : 0),
+    regions: acc.regions + 1,
+  }), { claimed: 0, verified: 0, absentRegions: 0, coveredRegions: 0, regions: 0 }), [aggregates]);
+  const visibleAggregates = useMemo(
+    () => deficitMode ? aggregates.filter((row) => row.claimed_count === 0) : aggregates,
+    [aggregates, deficitMode],
+  );
+  const visibleFacilities = deficitMode ? [] : facilities;
+
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    if (deficitMode && !visibleAggregates.some((row) => normalizeRegion(row.region_name) === normalizeRegion(region))) {
+      setSummary(null);
+      return;
+    }
     const resolved = resolveRegionName(region, aggregates, facilities) ?? region;
     const isStateRegion = aggregates.some((row) => normalizeRegion(row.region_name) === normalizeRegion(resolved));
     if (!isStateRegion) {
@@ -77,19 +94,19 @@ function MapContent() {
         if (data?.region) setSummary(data);
       })
       .catch(() => null);
-  }, [aggregates, capability, facilities, region]);
+  }, [aggregates, capability, deficitMode, facilities, region, visibleAggregates]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setRegionSuggestions(findRegionSuggestions(regionQuery, aggregates, facilities));
+      setRegionSuggestions(findRegionSuggestions(regionQuery, deficitMode ? visibleAggregates : aggregates, deficitMode ? [] : facilities));
     }, REGION_SUGGEST_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [aggregates, facilities, regionQuery]);
+  }, [aggregates, deficitMode, facilities, regionQuery, visibleAggregates]);
 
   function submitRegionSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const next = regionQuery.trim();
-    const resolved = resolveRegionName(next, aggregates, facilities);
+    const resolved = resolveRegionName(next, deficitMode ? visibleAggregates : aggregates, deficitMode ? [] : facilities);
     if (resolved) {
       setRegion(resolved);
       setRegionQuery(resolved);
@@ -103,13 +120,15 @@ function MapContent() {
     setRegionSuggestions([]);
   }
 
-  const national = useMemo(() => aggregates.reduce((acc, row) => ({
-    claimed: acc.claimed + row.claimed_count,
-    verified: acc.verified + row.verified_count,
-    zeroVerifiedRegions: acc.zeroVerifiedRegions + (row.claimed_count > 0 && row.verified_count === 0 ? 1 : 0),
-    coveredRegions: acc.coveredRegions + (row.verified_count > 0 ? 1 : 0),
-    regions: acc.regions + 1,
-  }), { claimed: 0, verified: 0, zeroVerifiedRegions: 0, coveredRegions: 0, regions: 0 }), [aggregates]);
+  useEffect(() => {
+    if (!deficitMode || visibleAggregates.length === 0) return;
+    const currentVisible = visibleAggregates.some((row) => normalizeRegion(row.region_name) === normalizeRegion(region));
+    if (!currentVisible) {
+      const nextRegion = visibleAggregates[0].region_name;
+      setRegion(nextRegion);
+      setRegionQuery(nextRegion);
+    }
+  }, [deficitMode, region, visibleAggregates]);
 
   return (
     <AppShell>
@@ -122,9 +141,9 @@ function MapContent() {
             ))}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <Toggle label="Verified only" hint="Show facilities that are currently safest to use for planning based on available evidence." on={verifiedOnly} onChange={setVerifiedOnly} />
-            <Toggle label="Show review-needed" hint="Include promising facilities that should be confirmed before referral or field use." on={showReview} onChange={setShowReview} />
-            <Toggle label="Deficit map" hint="Color states by access deficit for the selected capability." on={deficitMode} onChange={setDeficitMode} />
+            <Toggle label="Verified Only" hint="Show facilities that are currently safest to use for planning based on available evidence." on={verifiedOnly} onChange={setVerifiedOnly} />
+            <Toggle label="Show Review-Needed" hint="Include promising facilities that should be confirmed before referral or field use." on={showReview} onChange={setShowReview} />
+            <DeficitSwitch on={deficitMode} onChange={setDeficitMode} />
             <div className="inline-flex rounded-md border hairline bg-surface-muted p-0.5">
               <button onClick={() => setView("map")} className={cn("inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-[11px]", view === "map" ? "bg-surface shadow-sm" : "text-muted-foreground")}><MapPin className="h-3 w-3" /> Map</button>
               <button onClick={() => setView("list")} className={cn("inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-[11px]", view === "list" ? "bg-surface shadow-sm" : "text-muted-foreground")}><List className="h-3 w-3" /> List</button>
@@ -140,10 +159,10 @@ function MapContent() {
               value={regionQuery}
               onChange={(event) => setRegionQuery(event.target.value)}
               className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-muted-foreground"
-              placeholder="Search state or city"
+              placeholder={deficitMode ? "Search missing region" : "Search state or city"}
             />
           </div>
-          <Button type="submit" size="sm" variant="outline" className="h-8 text-[12px]">Update region</Button>
+          <Button type="submit" size="sm" variant="outline" className="h-8 text-[12px]">Update Region</Button>
           {regionSuggestions.length > 0 && (
             <div className="flex w-full flex-wrap items-center gap-1 pl-[58px] text-[11px]">
               <span className="mr-1 text-muted-foreground">Suggestions</span>
@@ -165,9 +184,9 @@ function MapContent() {
       <div className="grid flex-1 grid-cols-1 lg:min-h-[calc(100svh-128px)] lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="relative min-h-[62vh] bg-map-water lg:min-h-0">
           {view === "map" ? (
-            <IndiaMap aggregates={aggregates} facilities={facilities} capability={capability} level="state" mode={deficitMode ? "deficit" : "coverage"} onRegionClick={(name) => { setRegion(name); setRegionQuery(name); }} />
+            <IndiaMap aggregates={visibleAggregates} facilities={visibleFacilities} capability={capability} level="state" mode={deficitMode ? "deficit" : "coverage"} onRegionClick={(name) => { setRegion(name); setRegionQuery(name); }} />
           ) : (
-            <ListFallback facilities={facilities} capability={capability} />
+            deficitMode ? <AbsenceList aggregates={visibleAggregates} capability={capability} /> : <ListFallback facilities={facilities} capability={capability} />
           )}
         </div>
         <aside className="flex flex-col overflow-y-auto border-l hairline bg-surface">
@@ -180,8 +199,8 @@ function MapContent() {
               <div className="grid grid-cols-2 gap-2 border-b hairline px-4 py-3">
                 <Metric label="Claimed" value={summary.claimed_count} />
                 <Metric label="Verified" value={summary.verified_count} tone="trust" />
-                <Metric label={deficitMode ? "Deficit" : "Needs review"} value={deficitMode ? Math.max(0, summary.claimed_count - summary.verified_count) : summary.needs_review_count} tone="caution" />
-                <Metric label={deficitMode ? "Severity" : "Contradictions"} value={deficitMode ? deficitSeverityLabel(summary.verified_count, summary.claimed_count) : summary.contradiction_count} tone={deficitMode ? deficitTone(summary.verified_count, summary.claimed_count) : "alert"} />
+                <Metric label={deficitMode ? "Capability Status" : "Needs Review"} value={deficitMode ? "Absent" : summary.needs_review_count} tone="caution" />
+                <Metric label={deficitMode ? "Severity" : "Contradictions"} value={deficitMode ? "Critical" : summary.contradiction_count} tone={deficitMode ? "alert" : "alert"} />
               </div>
               <div className="border-b hairline px-4 py-3 text-[12px]">
                 <div className="flex justify-between"><span className="text-muted-foreground">Verification rate</span><span className="font-mono">{Math.round((summary.verification_rate ?? 0) * 100)}%</span></div>
@@ -189,20 +208,26 @@ function MapContent() {
                 <div className="mt-1.5 text-[11px] text-muted-foreground">95% CI {Math.round((summary.ci_lower ?? 0) * 100)}% to {Math.round((summary.ci_upper ?? 0) * 100)}%</div>
                 {deficitMode && (
                   <div className="mt-2 rounded-md border hairline bg-surface-muted px-2.5 py-2 text-[11px] text-muted-foreground">
-                    {Math.max(0, summary.claimed_count - summary.verified_count).toLocaleString()} claimed {capabilityLabel(capability).toLowerCase()} facilities need verification before this region can be treated as covered.
+                    No claimed {capabilityLabel(capability)} facilities are present in this region in the current dataset.
                   </div>
                 )}
               </div>
-              <div className="border-b hairline px-4 py-3">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top facilities</div>
-                <ul className="flex flex-col gap-1">
-                  {summary.top_facilities.map((facility) => <li key={facility.facility_id}><Link href={`/facility/${facility.facility_id}`} className="flex items-center gap-2 rounded-md border hairline bg-surface px-2 py-1.5 hover:border-primary/30"><TrustRing score={facility.trust_score} size={28} showLabel={false} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium">{facility.name}</span><span className="block truncate text-[11px] text-muted-foreground">{formatLocation(facility)}</span></span><StatusBadge status={deriveStatus(facility)} /></Link></li>)}
-                </ul>
-              </div>
+              {deficitMode ? (
+                <div className="border-b hairline px-4 py-3 text-[12px] text-muted-foreground">
+                  Facility markers are hidden in deficit mode because the selected capability is absent in the highlighted regions.
+                </div>
+              ) : (
+                <div className="border-b hairline px-4 py-3">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top Facilities</div>
+                  <ul className="flex flex-col gap-1">
+                    {summary.top_facilities.map((facility) => <li key={facility.facility_id}><Link href={`/facility/${facility.facility_id}`} className="flex items-center gap-2 rounded-md border hairline bg-surface px-2 py-1.5 hover:border-primary/30"><TrustRing score={facility.trust_score} size={28} showLabel={false} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium">{facility.name}</span><span className="block truncate text-[11px] text-muted-foreground">{formatLocation(facility)}</span></span><StatusBadge status={deriveStatus(facility)} /></Link></li>)}
+                  </ul>
+                </div>
+              )}
             </>
-          ) : <div className="p-4"><EmptyState title="No region summary" /></div>}
+          ) : <div className="p-4"><EmptyState title={deficitMode ? "No Missing Regions" : "No Region Summary"} detail={deficitMode ? `Every region currently has at least one claimed ${capabilityLabel(capability)} facility.` : undefined} /></div>}
           <div className="mt-auto border-t hairline px-4 py-3">
-            <Link href={`/command?q=${encodeURIComponent(`${capabilityLabel(capability)} ${region}`)}`}><Button className="h-9 w-full text-[12px]">Show matching facilities <ChevronRight className="h-4 w-4" /></Button></Link>
+            <Link href={`/command?q=${encodeURIComponent(`${capabilityLabel(capability)} ${region}`)}`}><Button className="h-9 w-full text-[12px]">{deficitMode ? "Investigate Nearby Options" : "Show Matching Facilities"} <ChevronRight className="h-4 w-4" /></Button></Link>
           </div>
         </aside>
       </div>
@@ -212,8 +237,8 @@ function MapContent() {
         <span className="mr-6">Verified <strong className="font-mono text-trust">{national.verified.toLocaleString()}</strong></span>
         {deficitMode && (
           <>
-            <span className="mr-6">Zero verified regions <strong className="font-mono text-alert">{national.zeroVerifiedRegions.toLocaleString()}</strong></span>
-            <span>Regions covered <strong className="font-mono text-trust">{national.regions ? Math.round((national.coveredRegions / national.regions) * 100) : 0}%</strong></span>
+            <span className="mr-6">Capability absent regions <strong className="font-mono text-alert">{national.absentRegions.toLocaleString()}</strong></span>
+            <span>Visible <strong className="font-mono text-alert">{visibleAggregates.length.toLocaleString()}</strong></span>
           </>
         )}
       </div>
@@ -307,23 +332,30 @@ function normalizeRegion(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
-function deficitSeverityLabel(verified: number, claimed: number): string {
-  const rate = claimed > 0 ? verified / claimed : 0;
-  if (claimed === 0 || verified === 0) return "Critical";
-  if (rate < 0.2) return "High";
-  if (rate < 0.5) return "Moderate";
-  return "Covered";
-}
-
-function deficitTone(verified: number, claimed: number): "trust" | "caution" | "alert" {
-  const severity = deficitSeverityLabel(verified, claimed);
-  if (severity === "Covered") return "trust";
-  if (severity === "Moderate") return "caution";
-  return "alert";
-}
-
 function Toggle({ label, hint, on, onChange }: { label: string; hint: string; on: boolean; onChange: (v: boolean) => void }) {
   return <Hint text={hint}><button onClick={() => onChange(!on)} role="switch" aria-checked={on} className={cn("inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium", on ? "border-primary/40 bg-primary-soft text-primary-soft-foreground" : "hairline bg-surface text-muted-foreground")}><span className={cn("h-1.5 w-1.5 rounded-full", on ? "bg-primary" : "bg-muted-foreground/40")} />{label}</button></Hint>;
+}
+
+function DeficitSwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <Hint text="Show only regions where the selected capability has no claimed facility records. Facility and city markers are hidden in this mode.">
+      <button
+        type="button"
+        onClick={() => onChange(!on)}
+        role="switch"
+        aria-checked={on}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium transition",
+          on ? "border-alert/40 bg-alert-soft text-alert" : "hairline bg-surface text-muted-foreground",
+        )}
+      >
+        <span className={cn("relative h-4 w-7 rounded-full transition", on ? "bg-alert" : "bg-muted-foreground/25")}>
+          <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition", on ? "left-3.5" : "left-0.5")} />
+        </span>
+        Deficit Regions
+      </button>
+    </Hint>
+  );
 }
 
 function ListFallback({ facilities, capability }: { facilities: FacilityPoint[]; capability: string }) {
@@ -332,6 +364,31 @@ function ListFallback({ facilities, capability }: { facilities: FacilityPoint[];
       <table className="w-full overflow-hidden rounded-md border hairline bg-surface text-[12px]">
         <thead className="bg-surface-muted text-muted-foreground"><tr><th className="px-3 py-2 text-left font-medium">Facility</th><th className="px-3 py-2 text-left font-medium">Location</th><th className="px-3 py-2 text-left font-medium">Status</th><th className="px-3 py-2 text-right font-medium">Trust</th></tr></thead>
         <tbody>{facilities.map((facility) => <tr key={facility.facility_id} className="border-t hairline"><td className="px-3 py-2"><Link href={`/facility/${facility.facility_id}`} className="font-medium hover:underline">{facility.name}</Link><div className="text-[11px] text-muted-foreground"><CapabilityBadge label={capabilityLabel(capability)} /></div></td><td className="px-3 py-2">{facility.city}, {facility.state}</td><td className="px-3 py-2"><StatusBadge status={deriveStatus(facility)} /></td><td className="px-3 py-2 text-right font-mono">{facility.trust_score ?? "-"}</td></tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function AbsenceList({ aggregates, capability }: { aggregates: AggregateRowWithCI[]; capability: string }) {
+  return (
+    <div className="absolute inset-0 overflow-auto p-4">
+      <table className="w-full overflow-hidden rounded-md border hairline bg-surface text-[12px]">
+        <thead className="bg-surface-muted text-muted-foreground">
+          <tr><th className="px-3 py-2 text-left font-medium">Region</th><th className="px-3 py-2 text-left font-medium">Capability</th><th className="px-3 py-2 text-right font-medium">Claimed</th><th className="px-3 py-2 text-right font-medium">Verified</th></tr>
+        </thead>
+        <tbody>
+          {aggregates.map((row) => (
+            <tr key={row.region_name} className="border-t hairline">
+              <td className="px-3 py-2 font-medium">{row.region_name}</td>
+              <td className="px-3 py-2"><CapabilityBadge label={capabilityLabel(capability)} /></td>
+              <td className="px-3 py-2 text-right font-mono">{row.claimed_count}</td>
+              <td className="px-3 py-2 text-right font-mono">{row.verified_count}</td>
+            </tr>
+          ))}
+          {aggregates.length === 0 && (
+            <tr><td colSpan={4} className="p-6"><EmptyState title="No Missing Regions" detail={`Every region currently has at least one claimed ${capabilityLabel(capability)} facility.`} /></td></tr>
+          )}
+        </tbody>
       </table>
     </div>
   );

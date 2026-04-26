@@ -157,7 +157,8 @@ function PlanSummary({ plan, query }: { plan: CarePlanResponse; query: string })
   const top = plan.recommendations[0];
   const second = plan.recommendations[1];
   const capability = plan.need.capability ? capabilityLabel(plan.need.capability) : "care";
-  const place = plan.need.place || "the requested area";
+  const place = formatPlannerPlace(plan.need.place);
+  const careNeed = formatCareNeed(query, capability, place);
   const topDistance = top?.facility.distance_km != null ? `${top.facility.distance_km.toFixed(1)} km away` : "distance not available";
   const topPlaceCopy = top?.facility.distance_km != null ? `near ${place}` : `matching ${place}`;
   const backupDistance = second?.facility.distance_km != null ? `, ${second.facility.distance_km.toFixed(1)} km away` : "";
@@ -168,12 +169,67 @@ function PlanSummary({ plan, query }: { plan: CarePlanResponse; query: string })
         Care access summary
       </div>
       <p className="text-[13px] leading-relaxed text-primary-soft-foreground">
-        For <span className="font-medium">{query}</span>, the strongest {capability} referral {topPlaceCopy} is {top ? <strong>{top.facility.name}</strong> : "not available"} {top ? ` in ${formatLocation(top.facility)}, ${topDistance}, with trust score ${top.facility.trust_score ?? "unknown"}.` : "."}
-        {second ? ` A backup option is ${second.facility.name} in ${formatLocation(second.facility)}${backupDistance} with trust score ${second.facility.trust_score ?? "unknown"}.` : ""}
+        For <span className="font-medium">{careNeed}</span>, the strongest {capability} referral {topPlaceCopy} is {top ? <strong>{top.facility.name}</strong> : "not available"}{top ? ` in ${formatLocation(top.facility)}, ${topDistance}, with trust score ${top.facility.trust_score ?? "unknown"}.` : "."}
+        {second ? ` A backup option is ${second.facility.name} in ${formatLocation(second.facility)}${backupDistance}, with trust score ${second.facility.trust_score ?? "unknown"}.` : ""}
         {" "}Call first before referral to confirm bed, staff, and equipment availability.
       </p>
     </div>
   );
+}
+
+function formatPlannerPlace(place: string | null): string {
+  if (!place) return "the requested area";
+  const parts = place.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2 && parts[0].toLowerCase() === parts[1].toLowerCase()) return titleCasePlace(parts[0]);
+  return parts.map(titleCasePlace).join(", ");
+}
+
+function formatCareNeed(query: string, capability: string, place: string): string {
+  const radius = query.match(/\b(?:within|inside|in)?\s*(\d+)\s*km(?:\s+radius)?\b/i)?.[1] ?? null;
+  let text = query
+    .trim()
+    .replace(/\b(?:within|inside|in)?\s*\d+\s*km(?:\s+radius)?\b/gi, "")
+    .replace(/\s+/g, " ")
+    .replace(/[,.]$/, "")
+    .trim();
+
+  if (!text) text = `${capability} care in ${place}`;
+  text = normalizeCareTerms(text, place);
+
+  if (/\sneeds\s/i.test(text)) {
+    text = text.replace(/\sneeds\s/i, " who needs ");
+  } else if (!/\bwho needs\b/i.test(text)) {
+    text = `${text} requiring ${capability} care`;
+  }
+
+  if (!/^(a|an|the)\s/i.test(text)) text = `${articleFor(text)} ${text}`;
+  return radius ? `${text} within ${radius} km` : text;
+}
+
+function normalizeCareTerms(value: string, place: string): string {
+  let text = value.toLowerCase();
+  const placeParts = place.split(",").map((part) => part.trim()).filter(Boolean);
+  for (const part of placeParts) {
+    text = text.replace(new RegExp(`\\b${escapeRegExp(part.toLowerCase())}\\b`, "g"), titleCasePlace(part));
+  }
+  return text
+    .replace(/\bicu\b/g, "ICU")
+    .replace(/\bnicu\b/g, "NICU")
+    .replace(/\bct\b/g, "CT")
+    .replace(/\bmri\b/g, "MRI")
+    .replace(/\ber\b/g, "ER");
+}
+
+function titleCasePlace(value: string): string {
+  return value.toLowerCase().replace(/\b[a-z]/g, (char) => char.toUpperCase());
+}
+
+function articleFor(value: string): "a" | "an" {
+  return /^[aeiou]/i.test(value.trim()) ? "an" : "a";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function playStepSequence(setStep: (step: number) => void, totalSteps: number) {
