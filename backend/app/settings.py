@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     vector_search_endpoint: str = "tm_endpoint"
     vector_search_index: str = "workspace.default.facility_index"
     mlflow_experiment: str = "trustmap_india"
+    review_queue_path: str = "/tmp/truecare_atlas_review_queue.json"
     cors_origins: list[str] = [
         "http://localhost:3000",
         "https://*.vercel.app",

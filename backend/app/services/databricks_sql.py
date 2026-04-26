@@ -18,6 +18,7 @@ from app.schemas import (
     FacilityFilters,
     FacilityFull,
     FacilityHit,
+    PlaceResolution,
     Severity,
     TrustFlag,
     TrustReport,
@@ -199,6 +200,150 @@ def query_facilities_by_geo(
             {filter_clause}
         ORDER BY distance_km
         LIMIT 50
+    """
+    params = [lat, lng, lat, lat, lng, lat, radius_km] + filter_params
+    rows = _execute(sql, params)
+    return [_row_to_facility_hit(r, distance_km=r.get("distance_km")) for r in rows]
+
+
+def resolve_place(place: str) -> PlaceResolution | None:
+    """Resolve a pincode/city/state to a centroid using the facility table itself."""
+    q = place.strip()
+    if not q:
+        return None
+    q_lower = q.lower()
+
+    attempts: list[tuple[str, str, list]] = []
+    if q.isdigit():
+        attempts.append((
+            "pincode",
+            """
+                SELECT pincode, city, state_canon, AVG(latitude) AS latitude,
+                       AVG(longitude) AS longitude, COUNT(*) AS facility_count
+                FROM workspace.default.gold_facility_trust
+                WHERE pincode = ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+                GROUP BY pincode, city, state_canon
+                ORDER BY facility_count DESC
+                LIMIT 1
+            """,
+            [q],
+        ))
+
+    attempts.extend([
+        (
+            "city",
+            """
+                SELECT city, state_canon, AVG(latitude) AS latitude,
+                       AVG(longitude) AS longitude, COUNT(*) AS facility_count
+                FROM workspace.default.gold_facility_trust
+                WHERE LOWER(city) = ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+                GROUP BY city, state_canon
+                ORDER BY facility_count DESC
+                LIMIT 1
+            """,
+            [q_lower],
+        ),
+        (
+            "state",
+            """
+                SELECT state_canon, AVG(latitude) AS latitude,
+                       AVG(longitude) AS longitude, COUNT(*) AS facility_count
+                FROM workspace.default.gold_facility_trust
+                WHERE LOWER(state_canon) = ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+                GROUP BY state_canon
+                ORDER BY facility_count DESC
+                LIMIT 1
+            """,
+            [q_lower],
+        ),
+        (
+            "city_partial",
+            """
+                SELECT city, state_canon, AVG(latitude) AS latitude,
+                       AVG(longitude) AS longitude, COUNT(*) AS facility_count
+                FROM workspace.default.gold_facility_trust
+                WHERE LOWER(city) LIKE ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+                GROUP BY city, state_canon
+                ORDER BY facility_count DESC
+                LIMIT 1
+            """,
+            [f"%{q_lower}%"],
+        ),
+        (
+            "state_partial",
+            """
+                SELECT state_canon, AVG(latitude) AS latitude,
+                       AVG(longitude) AS longitude, COUNT(*) AS facility_count
+                FROM workspace.default.gold_facility_trust
+                WHERE LOWER(state_canon) LIKE ? AND latitude IS NOT NULL AND longitude IS NOT NULL
+                GROUP BY state_canon
+                ORDER BY facility_count DESC
+                LIMIT 1
+            """,
+            [f"%{q_lower}%"],
+        ),
+    ])
+
+    for match_type, sql, params in attempts:
+        rows = _execute(sql, params)
+        if not rows:
+            continue
+        r = rows[0]
+        city = _clean_str(r.get("city"))
+        state = _clean_str(r.get("state_canon"))
+        pincode = r.get("pincode")
+        label_parts = [p for p in [city, state, pincode] if p]
+        label = ", ".join(label_parts) if label_parts else q
+        return PlaceResolution(
+            query=q,
+            match_type=match_type,
+            label=label,
+            latitude=float(r["latitude"]),
+            longitude=float(r["longitude"]),
+            facility_count=int(r.get("facility_count") or 0),
+            city=city,
+            state=state,
+            pincode=pincode,
+        )
+
+    return None
+
+
+def query_facilities_nearby(
+    lat: float,
+    lng: float,
+    radius_km: float,
+    capability: str | None = None,
+    filters: FacilityFilters | None = None,
+    k: int = 20,
+) -> list[FacilityHit]:
+    """Nearby facility search with optional capability and standard filters."""
+    safe_capability = None
+    if capability:
+        normalized = _CAP_ALIASES.get(capability.lower().replace(" ", "_"), capability)
+        if normalized in _CAP_COLS:
+            safe_capability = normalized
+
+    cap_clause = f" AND t.{safe_capability} = TRUE" if safe_capability else ""
+    filter_clause, filter_params = _filters_clause(filters)
+    distance_expr = """
+        (6371 * acos(LEAST(1, GREATEST(-1,
+            cos(radians(?)) * cos(radians(t.latitude)) *
+            cos(radians(t.longitude) - radians(?)) +
+            sin(radians(?)) * sin(radians(t.latitude))
+        ))))
+    """
+    sql = f"""
+        SELECT t.*, {distance_expr} AS distance_km
+        FROM workspace.default.gold_facility_trust t
+        WHERE
+            t.latitude IS NOT NULL
+            AND t.longitude IS NOT NULL
+            AND {distance_expr} <= ?
+            {cap_clause}
+            {filter_clause}
+        ORDER BY distance_km ASC, t.trust_score DESC
+        LIMIT {int(k)}
     """
     params = [lat, lng, lat, lat, lng, lat, radius_km] + filter_params
     rows = _execute(sql, params)
@@ -470,6 +615,75 @@ def query_map_facilities() -> list[dict]:
         for r in rows
         if r.get("latitude") is not None and r.get("longitude") is not None
     ]
+
+
+def query_data_health_metrics() -> dict:
+    """Small set of counts for the Data Health / Governance screen."""
+    metrics: dict[str, Any] = {}
+
+    table_rows = _execute("""
+        SELECT 'silver_facility' AS table_name, COUNT(*) AS row_count
+        FROM workspace.default.silver_facility
+        UNION ALL
+        SELECT 'gold_facility_capabilities' AS table_name, COUNT(*) AS row_count
+        FROM workspace.default.gold_facility_capabilities
+        UNION ALL
+        SELECT 'gold_facility_trust' AS table_name, COUNT(*) AS row_count
+        FROM workspace.default.gold_facility_trust
+        UNION ALL
+        SELECT 'gold_state_aggregates' AS table_name, COUNT(*) AS row_count
+        FROM workspace.default.gold_state_aggregates
+    """)
+    metrics["tables"] = {
+        r["table_name"]: int(r["row_count"] or 0)
+        for r in table_rows
+    }
+
+    trust_rows = _execute("""
+        SELECT
+            COUNT(*) AS total_facilities,
+            AVG(trust_score) AS avg_trust_score,
+            SUM(CASE WHEN trust_score >= 80 THEN 1 ELSE 0 END) AS high_trust,
+            SUM(CASE WHEN trust_score >= 50 AND trust_score < 80 THEN 1 ELSE 0 END) AS medium_trust,
+            SUM(CASE WHEN trust_score < 50 THEN 1 ELSE 0 END) AS low_trust,
+            SUM(CASE WHEN flag_count > 0 THEN 1 ELSE 0 END) AS review_needed,
+            SUM(CASE WHEN r6_modality_contradiction THEN 1 ELSE 0 END) AS contradictions
+        FROM workspace.default.gold_facility_trust
+    """)
+    if trust_rows:
+        r = trust_rows[0]
+        metrics["trust"] = {
+            "total_facilities": int(r.get("total_facilities") or 0),
+            "avg_trust_score": round(float(r.get("avg_trust_score") or 0), 2),
+            "high_trust": int(r.get("high_trust") or 0),
+            "medium_trust": int(r.get("medium_trust") or 0),
+            "low_trust": int(r.get("low_trust") or 0),
+            "review_needed": int(r.get("review_needed") or 0),
+            "contradictions": int(r.get("contradictions") or 0),
+        }
+
+    cap_rows = _execute("""
+        SELECT
+            SUM(CASE WHEN has_icu THEN 1 ELSE 0 END) AS has_icu,
+            SUM(CASE WHEN has_nicu THEN 1 ELSE 0 END) AS has_nicu,
+            SUM(CASE WHEN has_dialysis THEN 1 ELSE 0 END) AS has_dialysis,
+            SUM(CASE WHEN has_oncology THEN 1 ELSE 0 END) AS has_oncology,
+            SUM(CASE WHEN has_emergency_surgery THEN 1 ELSE 0 END) AS has_emergency_surgery,
+            SUM(CASE WHEN has_24x7 THEN 1 ELSE 0 END) AS has_24x7,
+            SUM(CASE WHEN has_maternity THEN 1 ELSE 0 END) AS has_maternity,
+            SUM(CASE WHEN has_blood_bank THEN 1 ELSE 0 END) AS has_blood_bank,
+            SUM(CASE WHEN has_anesthesia THEN 1 ELSE 0 END) AS has_anesthesia,
+            SUM(CASE WHEN has_trauma THEN 1 ELSE 0 END) AS has_trauma,
+            SUM(CASE WHEN has_cardiac_cath_lab THEN 1 ELSE 0 END) AS has_cardiac_cath_lab
+        FROM workspace.default.gold_facility_trust
+    """)
+    if cap_rows:
+        metrics["capabilities"] = {
+            k: int(v or 0)
+            for k, v in cap_rows[0].items()
+        }
+
+    return metrics
 
 
 def _pincode_col(capability: str) -> str:

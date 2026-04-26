@@ -7,7 +7,18 @@ from fastapi.responses import JSONResponse
 
 from app.errors import DatabricksQueryError, FacilityNotFoundError, VectorSearchError
 from app.settings import settings
-from app.routers import search, facility, audit, map_routes, traces, export, validate
+from app.routers import (
+    audit,
+    data_health,
+    export,
+    facility,
+    map_routes,
+    nearby,
+    reviews,
+    search,
+    traces,
+    validate,
+)
 
 
 @asynccontextmanager
@@ -33,9 +44,12 @@ app.include_router(search.router, prefix="/api")
 app.include_router(facility.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(map_routes.router, prefix="/api")
+app.include_router(nearby.router, prefix="/api")
 app.include_router(traces.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(validate.router, prefix="/api")
+app.include_router(reviews.router, prefix="/api")
+app.include_router(data_health.router, prefix="/api")
 
 
 @app.exception_handler(FacilityNotFoundError)

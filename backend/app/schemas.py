@@ -156,6 +156,25 @@ class AggregateByInput(BaseModel):
     capability: str  # e.g. "has_nicu"
 
 
+class PlaceResolution(BaseModel):
+    query: str
+    match_type: str
+    label: str
+    latitude: float
+    longitude: float
+    facility_count: int
+    city: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+
+
+class NearbySearchResponse(BaseModel):
+    origin: PlaceResolution
+    radius_km: float
+    capability: str | None = None
+    facilities: list[FacilityHit]
+
+
 # ---------------------------------------------------------------------------
 # Tool output / API response schemas (§3.3)
 # ---------------------------------------------------------------------------
@@ -262,3 +281,68 @@ class ValidatorResult(BaseModel):
     findings: list[ValidationFinding] = []
     medical_standards_checked: list[str] = []
     recommendation: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Review queue
+# ---------------------------------------------------------------------------
+
+class ReviewStatus(StrEnum):
+    PENDING = "pending"
+    PHONE_VERIFICATION = "phone_verification"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class ReviewNote(BaseModel):
+    text: str
+    created_at: str
+
+
+class ReviewTaskCreate(BaseModel):
+    facility_id: str
+    facility_name: str | None = None
+    capability: str | None = None
+    claim: str | None = None
+    reason: str
+    severity: Severity = Severity.YELLOW
+    evidence_for: list[str] = []
+    evidence_against: list[str] = []
+    source: str = "manual"
+
+
+class ReviewTaskUpdate(BaseModel):
+    status: ReviewStatus | None = None
+    owner: str | None = None
+    note: str | None = None
+
+
+class ReviewTask(BaseModel):
+    id: str
+    facility_id: str
+    facility_name: str | None = None
+    capability: str | None = None
+    claim: str | None = None
+    reason: str
+    severity: Severity
+    evidence_for: list[str] = []
+    evidence_against: list[str] = []
+    source: str = "manual"
+    status: ReviewStatus = ReviewStatus.PENDING
+    owner: str | None = None
+    notes: list[ReviewNote] = []
+    created_at: str
+    updated_at: str
+
+
+# ---------------------------------------------------------------------------
+# Data Health / Governance
+# ---------------------------------------------------------------------------
+
+class DataHealthResponse(BaseModel):
+    status: str
+    generated_at: str
+    checks: dict
+    metrics: dict
+    pipeline: list[dict]
+    governance: list[str]
