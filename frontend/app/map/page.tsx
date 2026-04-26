@@ -2,8 +2,9 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ChevronRight, List, MapPin } from "lucide-react";
 import { AppShell, CapabilityBadge, EmptyState, Metric, StatusBadge, TrustRing } from "@/components/atlas/primitives";
 import { IndiaMap } from "@/components/india-map";
@@ -16,10 +17,19 @@ import { cn } from "@/lib/utils";
 const MAP_TTL_MS = 5 * 60_000;
 
 export default function MapPage() {
-  const [capability, setCapability] = useState("has_nicu");
+  return (
+    <Suspense fallback={<AppShell><div className="p-6 text-sm text-muted-foreground">Loading map...</div></AppShell>}>
+      <MapContent />
+    </Suspense>
+  );
+}
+
+function MapContent() {
+  const params = useSearchParams();
+  const [capability, setCapability] = useState(params.get("capability") || "has_nicu");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [showReview, setShowReview] = useState(true);
-  const [region, setRegion] = useState("Bihar");
+  const [region, setRegion] = useState(params.get("region") || "Bihar");
   const [view, setView] = useState<"map" | "list">("map");
   const [aggregates, setAggregates] = useState<AggregateRowWithCI[]>([]);
   const [facilities, setFacilities] = useState<FacilityPoint[]>([]);

@@ -5,12 +5,13 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Activity, AlertOctagon, Brain, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, FileText, Filter, Loader2, MapPin, Plus, Search, ShieldCheck, Zap } from "lucide-react";
-import { AppShell, CapabilityBadge, EmptyState, EvidenceQuote, StatusBadge, TrustRing } from "@/components/atlas/primitives";
+import { Activity, AlertOctagon, Brain, CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, FileText, Filter, Loader2, Map, MapPin, Plus, Search, ShieldCheck, Zap } from "lucide-react";
+import { AppShell, CapabilityBadge, EmptyState, StatusBadge, TrustRing } from "@/components/atlas/primitives";
 import { Button } from "@/components/ui/button";
+import { EvidenceLedgerButton } from "@/components/evidence-ledger";
 import { activeEvidenceRows, addToShortlist, capabilityKeyFromQuery, capabilityLabel, deriveStatus, formatLocation, trustFlagTitle } from "@/lib/atlas";
 import { cachedJson, readClientCache, writeClientCache } from "@/lib/client-cache";
-import type { FacilityFull, FacilityHit, ValidatorResult } from "@/lib/types";
+import type { FacilityFull, FacilityHit, IntentSearchResponse, ValidatorResult } from "@/lib/types";
 import { useStream } from "@/hooks/use-stream";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ function CommandContent() {
   const [results, setResults] = useState<FacilityHit[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<FacilityFull | null>(null);
+  const [intent, setIntent] = useState<IntentSearchResponse | null>(null);
   const [validation, setValidation] = useState<ValidatorResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedLoading, setSelectedLoading] = useState(false);
@@ -77,20 +79,22 @@ function CommandContent() {
     setSelected(null);
     setSelectedId(null);
     setValidation(null);
+    setIntent(null);
     setError(null);
     setLoading(true);
     if (mode === "deep") {
-      void stream.submit(urlQuery);
+      void fetchIntent(urlQuery, mode)
+        .then((data) => {
+          setIntent(data);
+          return stream.submit(urlQuery, intentContext(data));
+        })
+        .catch(() => stream.submit(urlQuery));
     } else {
       stream.reset();
-      cachedJson<FacilityHit[]>(
-        `truecare.cache.command.fast.${urlQuery.toLowerCase()}`,
-        `/api/search-quick?q=${encodeURIComponent(urlQuery)}&k=20`,
-        FAST_SEARCH_TTL_MS,
-        [],
-      )
+      fetchIntent(urlQuery, mode)
         .then((data) => {
-          const nextResults = Array.isArray(data) ? data : [];
+          setIntent(data);
+          const nextResults = Array.isArray(data.results) ? data.results : [];
           setResults(nextResults);
           writeClientCache<CommandCacheState>(COMMAND_STATE_KEY, {
             query: urlQuery,
@@ -164,6 +168,8 @@ function CommandContent() {
   const review = results.filter((f) => deriveStatus(f) !== "Verified").length;
   const summary = !activeQuery && results.length === 0
     ? "Enter a capability, facility type, or region to search live records."
+    : intent?.summary && mode === "fast"
+    ? intent.summary
     : mode === "deep" && stream.state.summary
     ? stream.state.summary
     : `Found ${results.length} candidate facilities for ${capabilityLabel(capKey)}. ${verified} are verified and ${review} need review. ${results[0]?.name ? `Highest-trust match is ${results[0].name}.` : ""}`;
@@ -215,7 +221,13 @@ function CommandContent() {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
             <span className="rounded-full border hairline bg-surface px-2 py-0.5 text-muted-foreground">Capability: {capabilityLabel(capKey)}</span>
-            <span className="rounded-full border hairline bg-surface px-2 py-0.5 text-muted-foreground">{mode === "deep" ? "Deep reasoning" : "Fast search"}</span>
+            <span className="rounded-full border hairline bg-surface px-2 py-0.5 text-muted-foreground">{intent ? intent.intent.replaceAll("_", " ") : mode === "deep" ? "Deep reasoning" : "Fast search"}</span>
+            {intent?.place && <span className="rounded-full border hairline bg-surface px-2 py-0.5 text-muted-foreground">Place: {intent.place}</span>}
+            {intent?.radius_km && <span className="rounded-full border hairline bg-surface px-2 py-0.5 text-muted-foreground">Radius: {Math.round(intent.radius_km)} km</span>}
+            {intent?.intent_confidence && <span className="rounded-full border hairline bg-surface px-2 py-0.5 text-muted-foreground">Route {Math.round(intent.intent_confidence * 100)}%</span>}
+            {intent?.intent === "coverage_gap_search" && (
+              <Link href={`/map?capability=${encodeURIComponent(intent.capability || capKey)}&region=${encodeURIComponent(intent.region_summary?.region || intent.place || "")}`} className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary-soft px-2 py-0.5 text-primary hover:underline"><Map className="h-3 w-3" /> Open map</Link>
+            )}
             {stream.state.trace_id && <Link href={`/trace/${stream.state.trace_id}`} className="ml-auto font-mono text-primary hover:underline">trace {stream.state.trace_id}</Link>}
           </div>
         </div>
@@ -308,7 +320,7 @@ function Inspector({ facility, validation, validationLoading, traceId, onExport,
       <Section title="Capability matrix">
         <table className="w-full text-[12px]"><tbody>{rows.slice(0, 8).map((row) => <tr key={row.key} className="border-b hairline last:border-0"><td className="py-1.5 font-medium">{row.label}</td><td className="py-1.5">{row.status}</td><td className="py-1.5 text-right font-mono">{row.confidence}</td></tr>)}</tbody></table>
       </Section>
-      <Section title="Evidence quotes">{rows.filter((r) => r.quote).slice(0, 3).map((row) => <EvidenceQuote key={row.key} quote={row.quote!} source={row.source} confidence={row.confidence} contradicted={row.status === "Contradicted"} />)}</Section>
+      <Section title="Evidence quotes">{rows.filter((r) => r.quote).slice(0, 3).map((row) => <EvidenceLedgerButton key={row.key} facilityId={facility.facility_id} capability={row.key} quote={row.quote!} source={row.source} confidence={row.confidence} contradicted={row.status === "Contradicted"} />)}</Section>
       <Section title="Trust audit">{facility.trust_report?.flags.length ? facility.trust_report.flags.map((flag) => <div key={flag.rule_id} className="rounded-md border hairline bg-surface px-2.5 py-1.5 text-[12px]"><AlertOctagon className="mr-1 inline h-3.5 w-3.5 text-alert" />{trustFlagTitle(flag)}</div>) : <p className="text-[12px] text-muted-foreground">No active trust flags.</p>}</Section>
       <Section title="Validation">
         {validationLoading ? (
@@ -371,6 +383,27 @@ async function exportFacility(id: string) {
   const a = document.createElement("a");
   a.href = url; a.download = "truecare-facility.csv"; a.click();
   URL.revokeObjectURL(url);
+}
+
+async function fetchIntent(query: string, mode: "fast" | "deep"): Promise<IntentSearchResponse> {
+  const resp = await fetch("/api/intent-search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, mode }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+function intentContext(intent: IntentSearchResponse): Record<string, unknown> {
+  return {
+    intent: intent.intent,
+    intent_confidence: intent.intent_confidence,
+    routing_reason: intent.routing_reason,
+    capability: intent.capability,
+    place: intent.place,
+    radius_km: intent.radius_km,
+  };
 }
 
 function SearchSkeleton() {

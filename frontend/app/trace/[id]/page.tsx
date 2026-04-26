@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Braces, ExternalLink } from "lucide-react";
+import { ArrowLeft, Braces } from "lucide-react";
 import { AppShell, EmptyState } from "@/components/atlas/primitives";
-import { Button } from "@/components/ui/button";
 
 export default function TracePage() {
   const { id } = useParams<{ id: string }>();
@@ -22,8 +21,7 @@ export default function TracePage() {
       </div>
       <div className="flex flex-1 flex-col gap-4 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div><h1 className="text-[20px] font-semibold tracking-tight">Trace {id}</h1><p className="text-[12px] text-muted-foreground">MLflow trace payload from the backend proxy.</p></div>
-          <Button variant="outline" size="sm" className="h-8 text-[12px]"><ExternalLink className="h-3.5 w-3.5" /> Backend trace</Button>
+          <div><h1 className="text-[20px] font-semibold tracking-tight">Trace {id}</h1><p className="text-[12px] text-muted-foreground">{traceLabel(trace)}</p></div>
         </div>
         {trace ? (
           <div className="overflow-hidden rounded-lg border hairline bg-surface">
@@ -36,4 +34,12 @@ export default function TracePage() {
       </div>
     </AppShell>
   );
+}
+
+function traceLabel(trace: Record<string, unknown> | null): string {
+  const state = String(trace?.trace_state || "");
+  if (state === "trace_ready") return "Trace ready from backend activity and MLflow metadata.";
+  if (state === "local_activity_only") return "Local activity only: streamed tool calls were captured for this session.";
+  if (state === "trace_unavailable") return "Trace unavailable: showing backend fallback details.";
+  return "Loading trace state.";
 }

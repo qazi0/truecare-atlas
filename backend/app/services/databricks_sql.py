@@ -15,6 +15,7 @@ from app.schemas import (
     AggregateRowWithCI,
     Capability,
     Confidence,
+    EvidenceClaim,
     FacilityCapabilities,
     FacilityFilters,
     FacilityFull,
@@ -26,6 +27,7 @@ from app.schemas import (
     TrustFlag,
     TrustReport,
 )
+from app.settings import settings
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -401,6 +403,13 @@ _CAP_ALIASES: dict[str, str] = {
 }
 
 
+def normalize_capability(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = _CAP_ALIASES.get(value.lower().replace(" ", "_"), value)
+    return normalized if normalized in _CAP_COLS else None
+
+
 def query_facilities_by_capability(
     flags: list[str],
     filters: FacilityFilters | None = None,
@@ -408,7 +417,7 @@ def query_facilities_by_capability(
 ) -> list[FacilityHit]:
     """Filter by boolean capability columns."""
     valid = set(_CAP_COLS)
-    normalized = [_CAP_ALIASES.get(f.lower().replace(" ", "_"), f) for f in flags]
+    normalized = [normalize_capability(f) for f in flags]
     safe_flags = [f for f in normalized if f in valid]
     if not safe_flags:
         return []
@@ -500,6 +509,120 @@ def query_facility_by_id(facility_id: str) -> FacilityFull:
         capability_text=_to_list(row.get("silver_capabilities")),
         trust_report=trust_report,
     )
+
+
+def query_raw_record(facility_id: str) -> dict:
+    sql = """
+        SELECT *
+        FROM workspace.default.silver_facility
+        WHERE facility_id = ?
+        LIMIT 1
+    """
+    rows = _execute(sql, [facility_id])
+    if not rows:
+        raise FacilityNotFoundError(facility_id)
+    return _json_safe(rows[0])
+
+
+def query_evidence_claims_for_facility(facility_id: str) -> list[EvidenceClaim]:
+    sql = """
+        SELECT
+            t.*,
+            s.description,
+            s.specialties,
+            s.procedures,
+            s.equipment,
+            s.capabilities AS silver_capabilities
+        FROM workspace.default.gold_facility_trust t
+        LEFT JOIN workspace.default.silver_facility s
+            ON t.facility_id = s.facility_id
+        WHERE t.facility_id = ?
+        LIMIT 1
+    """
+    rows = _execute(sql, [facility_id])
+    if not rows:
+        raise FacilityNotFoundError(facility_id)
+    return _row_to_evidence_claims(rows[0])
+
+
+def query_evidence_claim(claim_id: str) -> EvidenceClaim:
+    parts = claim_id.split("__", 1)
+    if len(parts) != 2:
+        raise FacilityNotFoundError(claim_id)
+    for claim in query_evidence_claims_for_facility(parts[0]):
+        if claim.claim_id == claim_id:
+            return claim
+    raise FacilityNotFoundError(claim_id)
+
+
+def _row_to_evidence_claims(row: dict) -> list[EvidenceClaim]:
+    raw_record = {
+        "name": _clean_str(row.get("name")),
+        "description": _clean_str(row.get("description")),
+        "specialties": _json_safe(row.get("specialties")),
+        "procedures": _json_safe(row.get("procedures")),
+        "equipment": _json_safe(row.get("equipment")),
+        "capabilities": _json_safe(row.get("silver_capabilities")),
+    }
+    flags = _row_to_trust_report(row).flags
+    claims: list[EvidenceClaim] = []
+    for col in _CAP_COLS:
+        detail = _detail_to_dict(row.get(f"{col}_detail"))
+        quote = _clean_str(detail.get("evidence_quote")) if detail else None
+        value = bool(row.get(col))
+        if not value and not quote:
+            continue
+        rule_ids = [
+            flag.rule_id for flag in flags
+            if quote and quote in flag.evidence_quotes
+        ]
+        raw_source = detail.get("source_field") or detail.get("source") if detail else None
+        confidence = str(detail.get("confidence") or "low") if detail else "low"
+        claims.append(EvidenceClaim(
+            claim_id=f"{row['facility_id']}__{col}",
+            facility_id=row["facility_id"],
+            capability=col,
+            claim=f"Facility has {col.replace('has_', '').replace('_', ' ')}",
+            decision="verified" if value and quote else "claimed",
+            source_field=str(raw_source) if raw_source else None,
+            source_quote=quote,
+            raw_record=raw_record,
+            trust_rule_ids=rule_ids,
+            confidence=confidence,
+            model_version=settings.extraction_model,
+            created_at=str(row.get("created_at") or ""),
+            evidence_against=[
+                q for flag in flags for q in flag.evidence_quotes
+                if quote is None or q != quote
+            ][:4],
+        ))
+    return claims
+
+
+def _detail_to_dict(detail: Any) -> dict:
+    if not detail:
+        return {}
+    if isinstance(detail, dict):
+        return detail
+    if isinstance(detail, str):
+        try:
+            parsed = json.loads(detail)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return {}
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    return str(value)
 
 
 def query_trust_report(facility_id: str) -> TrustReport:
@@ -764,6 +887,30 @@ def query_generated_review_candidates(limit: int = 50) -> list[dict]:
                 "source": "generated",
             })
     return candidates
+
+
+def query_review_needed_facilities(
+    capability: str | None = None,
+    state: str | None = None,
+    k: int = 20,
+) -> list[FacilityHit]:
+    normalized = normalize_capability(capability)
+    clauses = ["(COALESCE(flag_count, 0) > 0 OR COALESCE(r6_modality_contradiction, FALSE) OR trust_score < 80)"]
+    params: list = []
+    if normalized:
+        clauses.append(f"{normalized} = TRUE")
+    if state:
+        clauses.append("state_canon = ?")
+        params.append(state)
+    sql = f"""
+        SELECT *
+        FROM workspace.default.gold_facility_trust
+        WHERE {" AND ".join(clauses)}
+        ORDER BY COALESCE(r6_modality_contradiction, FALSE) DESC, flag_count DESC, trust_score ASC
+        LIMIT {int(k)}
+    """
+    rows = _execute(sql, params)
+    return [_row_to_facility_hit(r) for r in rows]
 
 
 def query_data_health_metrics() -> dict:

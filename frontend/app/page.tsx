@@ -10,7 +10,7 @@ import { DEFAULT_PROMPTS } from "@/lib/atlas";
 import type { DataHealthResponse, HealthCheck } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const CHIPS = ["NICU Bihar", "Oncology Mumbai", "Dialysis Chennai", "Emergency surgery Delhi", "Maternity Kerala"];
+const CHIPS = ["NICU near Patna", "Map dialysis coverage in Chennai", "Oncology Mumbai", "Emergency surgery near Delhi", "Maternity Kerala needs review"];
 
 export default function MissionControl() {
   const router = useRouter();

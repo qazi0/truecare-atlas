@@ -20,13 +20,15 @@ class Settings(BaseSettings):
     vector_search_index: str = "workspace.default.facility_index"
     mlflow_experiment: str = "trustmap_india"
     review_queue_path: str = "/tmp/truecare_atlas_review_queue.json"
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
     cors_origins: list[str] = [
         "http://localhost:3000",
         "https://*.vercel.app",
         "https://*.databricksapps.com",
     ]
 
-    model_config = {"env_prefix": "TM_", "env_file": ".env"}
+    model_config = {"env_prefix": "TM_", "env_file": ".env", "extra": "ignore"}
 
 
 settings = Settings()

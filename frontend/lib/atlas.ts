@@ -35,12 +35,12 @@ export const CAPABILITY_OPTIONS = [
 ] as const;
 
 export const DEFAULT_PROMPTS = [
-  "Find verified NICU facilities in Bihar",
-  "Show oncology claims in Mumbai with evidence",
+  "NICU near Patna",
   "Map dialysis coverage in Chennai",
   "Which maternity facilities need review in Kerala?",
-  "Find emergency surgery facilities with anesthesia evidence",
-  "Where are high-trust neonatal care deserts?",
+  "Oncology claims in Mumbai with evidence",
+  "Emergency surgery near Delhi with anesthesia evidence",
+  "Where are neonatal care gaps in Bihar?",
 ];
 
 export function capabilityLabel(key: string): string {

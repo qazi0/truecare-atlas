@@ -11,6 +11,7 @@ from app.agent.prompts import SYSTEM_PROMPT
 from app.agent.tools import TOOL_DEFINITIONS, TOOL_REGISTRY, get_openai_tool_definitions
 from app.schemas import FacilityHit, SSEEvent, SSEEventType
 from app.services.databricks_fm import chat_completion
+from app.services.mlflow_tracing import new_local_trace_id, store_local_trace
 
 # Build a schema lookup once at import time
 _SCHEMA_BY_NAME: dict[str, type] = {name: schema for name, _, schema in TOOL_DEFINITIONS}
@@ -34,6 +35,7 @@ def _serialize(obj: object) -> object:
 async def run_agent_loop(
     query: str,
     emit: Callable[[SSEEvent], Awaitable[None]],
+    intent_context: dict | None = None,
     max_steps: int = MAX_STEPS,
 ) -> None:
     """
@@ -42,14 +44,27 @@ async def run_agent_loop(
     Flow per step:
       step -> (tool_call -> tool_result)* | (reasoning -> result) -> done
     """
+    user_content = query
+    if intent_context:
+        user_content = (
+            f"{query}\n\nParsed TrueCare Atlas intent context:\n"
+            f"{json.dumps(intent_context, default=str)}"
+        )
+
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": query},
+        {"role": "user", "content": user_content},
     ]
     tools = get_openai_tool_definitions()
     step_index = 0
     accumulated_facilities: list[FacilityHit] = []
     trace_id: str | None = None
+    local_trace_id = new_local_trace_id("activity")
+    started_at = _now()
+    started_monotonic = time.monotonic()
+    local_steps: list[dict] = []
+    final_answer = ""
+    error_message: str | None = None
 
     try:
         while step_index < max_steps:
@@ -61,6 +76,12 @@ async def run_agent_loop(
                     "timestamp": _now(),
                 },
             ))
+            local_steps.append({
+                "type": "step",
+                "step_index": step_index,
+                "description": f"Reasoning step {step_index + 1}",
+                "timestamp": _now(),
+            })
 
             response = await chat_completion(messages=messages, tools=tools)
             choice = response["choices"][0]
@@ -98,6 +119,13 @@ async def run_agent_loop(
                             "arguments": arguments,
                         },
                     ))
+                    local_steps.append({
+                        "type": "tool_call",
+                        "step_index": step_index,
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                        "timestamp": _now(),
+                    })
 
                     t_start = time.monotonic()
                     tool_fn = TOOL_REGISTRY.get(tool_name)
@@ -131,6 +159,14 @@ async def run_agent_loop(
                             "duration_ms": duration_ms,
                         },
                     ))
+                    local_steps.append({
+                        "type": "tool_result",
+                        "step_index": step_index,
+                        "tool_name": tool_name,
+                        "result": serialized_result,
+                        "duration_ms": duration_ms,
+                        "timestamp": _now(),
+                    })
 
                     # Append tool result to messages for next LLM turn
                     messages.append({
@@ -147,10 +183,17 @@ async def run_agent_loop(
             # ----------------------------------------------------------------
             content = message.get("content") or ""
             if content:
+                final_answer = content
                 await emit(SSEEvent(
                     type=SSEEventType.REASONING,
                     payload={"step_index": step_index, "text": content},
                 ))
+                local_steps.append({
+                    "type": "reasoning",
+                    "step_index": step_index,
+                    "text": content,
+                    "timestamp": _now(),
+                })
 
             # Deduplicate accumulated facilities (by facility_id, keep highest trust)
             seen: dict[str, FacilityHit] = {}
@@ -165,27 +208,44 @@ async def run_agent_loop(
                 payload={
                     "facilities": [f.model_dump() for f in final_facilities],
                     "summary": content,
-                    "trace_id": trace_id,
+                    "trace_id": trace_id or local_trace_id,
                 },
             ))
             return
 
         # max_steps exceeded
+        error_message = f"Agent exceeded {max_steps} steps without reaching a final answer."
         await emit(SSEEvent(
             type=SSEEventType.ERROR,
             payload={
-                "message": f"Agent exceeded {max_steps} steps without reaching a final answer.",
+                "message": error_message,
                 "step_index": step_index,
             },
         ))
 
     except Exception as exc:
+        error_message = str(exc)
         await emit(SSEEvent(
             type=SSEEventType.ERROR,
             payload={"message": str(exc), "step_index": step_index},
         ))
     finally:
+        duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+        store_local_trace(trace_id or local_trace_id, {
+            "query": query,
+            "intent_context": intent_context,
+            "trace_state": "trace_ready" if trace_id else "local_activity_only",
+            "mlflow_trace_id": trace_id,
+            "local_trace_id": local_trace_id,
+            "started_at": started_at,
+            "duration_ms": duration_ms,
+            "status": "error" if error_message else "ok",
+            "steps": local_steps,
+            "selected_facilities": [f.model_dump() for f in accumulated_facilities[:20]],
+            "final_answer": final_answer,
+            "errors": [error_message] if error_message else [],
+        })
         await emit(SSEEvent(
             type=SSEEventType.DONE,
-            payload={"trace_id": trace_id},
+            payload={"trace_id": trace_id or local_trace_id},
         ))

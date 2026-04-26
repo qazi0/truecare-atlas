@@ -1,4 +1,6 @@
 from enum import StrEnum
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -195,11 +197,31 @@ class AggregateRow(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     session_id: str | None = None
+    intent_context: dict[str, Any] | None = None
 
 
 class SearchResult(BaseModel):
     facilities: list[FacilityHit]
     summary: str
+    trace_id: str | None = None
+
+
+class IntentSearchRequest(BaseModel):
+    query: str
+    mode: str = "fast"
+
+
+class IntentSearchResponse(BaseModel):
+    intent: str
+    intent_confidence: float
+    routing_reason: str
+    capability: str | None = None
+    place: str | None = None
+    radius_km: float | None = None
+    results: list[FacilityHit] = []
+    summary: str = ""
+    evidence: list[dict[str, Any]] = []
+    region_summary: "RegionSummary | None" = None
     trace_id: str | None = None
 
 
@@ -238,6 +260,91 @@ class RecentTrace(BaseModel):
     duration_ms: int | None = None
     started_at: str | None = None
     steps: int | None = None
+
+
+class EvidenceClaim(BaseModel):
+    claim_id: str
+    facility_id: str
+    capability: str
+    claim: str
+    decision: str
+    source_field: str | None = None
+    source_quote: str | None = None
+    raw_record: dict[str, Any] = {}
+    trust_rule_ids: list[str] = []
+    confidence: str = "low"
+    model_version: str | None = None
+    created_at: str
+    validator_notes: list[str] = []
+    evidence_against: list[str] = []
+
+
+class AutoReviewBucket(StrEnum):
+    AUTO_VERIFIED_LOW_RISK = "auto_verified_low_risk"
+    PHONE_VERIFY = "phone_verify"
+    FIELD_VISIT_REQUIRED = "field_visit_required"
+    SPECIALIST_REVIEW = "specialist_review"
+    REJECT_OR_LOW_CONFIDENCE = "reject_or_low_confidence"
+
+
+class AutoReviewResult(BaseModel):
+    facility_id: str
+    facility_name: str | None = None
+    bucket: AutoReviewBucket
+    severity: Severity
+    reason: str
+    evidence_for: list[str] = []
+    evidence_against: list[str] = []
+    recommended_next_action: str
+    human_override_state: str | None = None
+
+
+class AutoReviewSummary(BaseModel):
+    total_candidates: int
+    buckets: dict[str, int]
+    human_review_required: int
+    updated_at: str
+
+
+class AutoReviewRunResponse(BaseModel):
+    limit: int
+    processed: int
+    created: int
+    summary: AutoReviewSummary
+    results: list[AutoReviewResult]
+
+
+class CarePlanRequest(BaseModel):
+    query: str
+    urgency: str | None = None
+    radius_km: float | None = None
+
+
+class CareNeed(BaseModel):
+    capability: str | None = None
+    place: str | None = None
+    urgency: str = "urgent"
+
+
+class CarePlanRecommendation(BaseModel):
+    facility: FacilityHit
+    rank: int
+    evidence_summary: str
+    risk_label: str
+    verification_warning: str
+    evidence_claim_ids: list[str] = []
+
+
+class CarePlanExport(BaseModel):
+    referral_brief_id: str
+
+
+class CarePlanResponse(BaseModel):
+    need: CareNeed
+    recommendations: list[CarePlanRecommendation]
+    call_first_checklist: list[str]
+    warnings: list[str]
+    export: CarePlanExport
 
 
 # ---------------------------------------------------------------------------

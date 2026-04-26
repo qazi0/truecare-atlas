@@ -3,14 +3,15 @@
 /* eslint-disable react-hooks/set-state-in-effect, react/no-unescaped-entities */
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Filter, MessageSquare, Phone, UserPlus, X } from "lucide-react";
+import { Check, Filter, Loader2, MessageSquare, Phone, UserPlus, X, Zap } from "lucide-react";
 import { AppShell, EmptyState } from "@/components/atlas/primitives";
 import { Button } from "@/components/ui/button";
 import { clearClientCache, readClientCache, writeClientCache } from "@/lib/client-cache";
-import type { ReviewTask } from "@/lib/types";
+import type { AutoReviewSummary, ReviewTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const FILTERS = ["Contradictions", "Low evidence", "Generated", "Open work"];
+const TABS = ["Urgent", "Phone verify", "Field visit", "Specialist review", "Low-risk", "Rejected"] as const;
 const REVIEW_CACHE_KEY = "truecare.cache.reviews";
 const REVIEW_TTL_MS = 30_000;
 const OPEN_STATUSES = new Set(["pending", "phone_verification"]);
@@ -26,6 +27,9 @@ interface ReviewGroup {
 export default function ReviewPage() {
   const [tasks, setTasks] = useState<ReviewTask[]>([]);
   const [active, setActive] = useState<string[]>(["Open work"]);
+  const [tab, setTab] = useState<(typeof TABS)[number]>("Urgent");
+  const [summary, setSummary] = useState<AutoReviewSummary | null>(null);
+  const [triaging, setTriaging] = useState(false);
 
   async function load() {
     const cached = readClientCache<ReviewTask[]>(REVIEW_CACHE_KEY);
@@ -37,6 +41,7 @@ export default function ReviewPage() {
     const nextTasks = Array.isArray(data) ? data : [];
     if (nextTasks.length) writeClientCache(REVIEW_CACHE_KEY, nextTasks, REVIEW_TTL_MS);
     setTasks(nextTasks);
+    void fetch("/api/reviews/summary").then((r) => r.ok ? r.json() : null).then(setSummary).catch(() => null);
   }
 
   useEffect(() => { void load(); }, []);
@@ -46,8 +51,8 @@ export default function ReviewPage() {
     if (active.includes("Low evidence") && task.severity !== "yellow") return false;
     if (active.includes("Generated") && task.source !== "generated") return false;
     if (active.includes("Open work") && !OPEN_STATUSES.has(task.status)) return false;
-    return true;
-  }), [active, tasks]);
+    return matchesTab(task, tab);
+  }), [active, tab, tasks]);
 
   const groups = useMemo(() => groupReviewTasks(filtered), [filtered]);
 
@@ -60,6 +65,16 @@ export default function ReviewPage() {
 
   function toggle(filter: string) {
     setActive((items) => items.includes(filter) ? items.filter((item) => item !== filter) : [...items, filter]);
+  }
+
+  async function runAutoTriage() {
+    setTriaging(true);
+    await fetch("/api/reviews/auto-run?limit=50", { method: "POST" }).then((r) => r.ok ? r.json() : null).then((data) => {
+      if (data?.summary) setSummary(data.summary);
+    }).catch(() => null);
+    clearClientCache(REVIEW_CACHE_KEY);
+    await load();
+    setTriaging(false);
   }
 
   async function patch(id: string, body: Partial<ReviewTask> & { note?: string }) {
@@ -93,10 +108,15 @@ export default function ReviewPage() {
           <Counter label="In progress" value={counters.progress} tone="caution" />
           <Counter label="Contradictions" value={counters.contradictions} tone="alert" />
           <Counter label="Generated" value={counters.generated} />
+          {summary && <span className="rounded-md border hairline bg-surface px-2 py-1 text-[11px] text-muted-foreground">{summary.total_candidates.toLocaleString()} candidates to {summary.buckets.phone_verify ?? 0} phone, {summary.buckets.field_visit_required ?? 0} field, {summary.buckets.auto_verified_low_risk ?? 0} low-risk</span>}
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            <Button size="sm" className="h-7 text-[11px]" disabled={triaging} onClick={runAutoTriage}>{triaging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />} Auto-triage next 50</Button>
             <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><Filter className="h-3 w-3" /> Filters</span>
             {FILTERS.map((filter) => <button key={filter} onClick={() => toggle(filter)} className={cn("rounded-full border px-2 py-0.5 text-[11px]", active.includes(filter) ? "border-primary bg-primary text-primary-foreground" : "hairline bg-surface text-muted-foreground")}>{filter}</button>)}
           </div>
+        </div>
+        <div className="flex gap-1 overflow-x-auto border-t hairline px-4 py-2">
+          {TABS.map((item) => <button key={item} onClick={() => setTab(item)} className={cn("whitespace-nowrap rounded-md px-2.5 py-1 text-[12px]", tab === item ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-surface-muted")}>{item}</button>)}
         </div>
       </div>
       <div className="flex flex-col gap-3 p-4">
@@ -167,6 +187,16 @@ function Severity({ severity }: { severity: ReviewTask["severity"] }) {
 
 function Evidence({ title, tone, items }: { title: string; tone: "trust" | "alert"; items: string[] }) {
   return <div className={cn("min-w-0 rounded-md border p-2.5", tone === "trust" ? "border-trust/30 bg-trust-soft/60" : "border-alert/30 bg-alert-soft/80")}><div className={cn("mb-1 text-[10px] font-semibold uppercase tracking-wider", tone === "trust" ? "text-trust" : "text-alert")}>{title}</div><p className="break-words font-mono text-[12px] text-foreground/80">{items.length ? items.join(" | ") : "No evidence captured"}</p></div>;
+}
+
+function matchesTab(task: ReviewTask, tab: (typeof TABS)[number]): boolean {
+  const reason = task.reason.toLowerCase();
+  if (tab === "Urgent") return task.severity === "red" && task.status !== "rejected";
+  if (tab === "Phone verify") return task.status === "phone_verification" || reason.includes("phone_verify");
+  if (tab === "Field visit") return reason.includes("field_visit_required");
+  if (tab === "Specialist review") return reason.includes("specialist_review");
+  if (tab === "Low-risk") return reason.includes("auto_verified_low_risk");
+  return task.status === "rejected";
 }
 
 function groupReviewTasks(tasks: ReviewTask[]): ReviewGroup[] {

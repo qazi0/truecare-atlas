@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AlertOctagon, ArrowLeft, Download, MapPin, Plus, ShieldCheck } from "lucide-react";
-import { AppShell, Breadcrumbs, CapabilityBadge, EmptyState, EvidenceQuote, StatusBadge, TrustRing } from "@/components/atlas/primitives";
+import { AppShell, Breadcrumbs, CapabilityBadge, EmptyState, StatusBadge, TrustRing } from "@/components/atlas/primitives";
+import { EvidenceLedgerButton } from "@/components/evidence-ledger";
 import { Button } from "@/components/ui/button";
 import { activeEvidenceRows, addToShortlist, deriveStatus, formatLocation, trustFlagTitle } from "@/lib/atlas";
 import type { FacilityFull, ValidatorResult } from "@/lib/types";
@@ -64,7 +65,7 @@ export default function FacilityPage() {
           {(tab === "Overview" || tab === "Capabilities") && <Section title="Capability matrix" subtitle="Per-capability claim, evidence, and confidence"><CapabilityTable rows={rows} /></Section>}
           {(tab === "Overview" || tab === "Trust Audit") && <Section title="Trust audit" subtitle="Rules evaluated against evidence"><TrustAudit facility={facility} /></Section>}
           {tab === "Validation" && <Section title="Validation" subtitle="Medical-plausibility checks">{validation ? <Validation validation={validation} /> : <p className="text-sm text-muted-foreground">Validation running...</p>}</Section>}
-          {(tab === "Overview" || tab === "Source Evidence") && <Section title="Source evidence" subtitle="Verbatim quotes from facility records"><div className="grid gap-3 sm:grid-cols-2">{rows.filter((r) => r.quote).map((row) => <div key={row.key} className="rounded-md border hairline bg-surface p-3"><EvidenceQuote quote={row.quote!} source={row.source} confidence={row.confidence} contradicted={row.status === "Contradicted"} /></div>)}</div></Section>}
+          {(tab === "Overview" || tab === "Source Evidence") && <Section title="Source evidence" subtitle="Verbatim quotes from facility records"><div className="grid gap-3 sm:grid-cols-2">{rows.filter((r) => r.quote).map((row) => <div key={row.key} className="rounded-md border hairline bg-surface p-3"><EvidenceLedgerButton facilityId={facility.facility_id} capability={row.key} quote={row.quote!} source={row.source} confidence={row.confidence} contradicted={row.status === "Contradicted"} /></div>)}</div></Section>}
           {tab === "Trace" && <Section title="Trace" subtitle="Facility scoring provenance"><TracePanel id={facility.facility_id} rows={rows.length} flags={facility.trust_report?.flags.length ?? 0} /></Section>}
         </div>
         <aside className="flex flex-col gap-4">

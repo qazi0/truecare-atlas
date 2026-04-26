@@ -14,6 +14,7 @@ router = APIRouter(tags=["search"])
 @router.post("/search")
 async def search(request: SearchRequest) -> EventSourceResponse:
     query = request.query
+    intent_context = request.intent_context
     queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
 
     async def _emit(event: SSEEvent) -> None:
@@ -34,7 +35,7 @@ async def search(request: SearchRequest) -> EventSourceResponse:
 
     async def _run_loop():
         try:
-            await run_agent_loop(query=query, emit=_emit)
+            await run_agent_loop(query=query, emit=_emit, intent_context=intent_context)
         finally:
             await queue.put(None)  # sentinel to close the generator
 

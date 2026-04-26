@@ -181,6 +181,78 @@ export interface RecentTrace {
   steps: number | null;
 }
 
+export interface IntentSearchResponse {
+  intent: string;
+  intent_confidence: number;
+  routing_reason: string;
+  capability: string | null;
+  place: string | null;
+  radius_km: number | null;
+  results: FacilityHit[];
+  summary: string;
+  evidence: Array<Record<string, unknown>>;
+  region_summary: RegionSummary | null;
+  trace_id: string | null;
+}
+
+export interface EvidenceClaim {
+  claim_id: string;
+  facility_id: string;
+  capability: string;
+  claim: string;
+  decision: string;
+  source_field: string | null;
+  source_quote: string | null;
+  raw_record: Record<string, unknown>;
+  trust_rule_ids: string[];
+  confidence: string;
+  model_version: string | null;
+  created_at: string;
+  validator_notes: string[];
+  evidence_against: string[];
+}
+
+export interface AutoReviewSummary {
+  total_candidates: number;
+  buckets: Record<string, number>;
+  human_review_required: number;
+  updated_at: string;
+}
+
+export interface AutoReviewRunResponse {
+  limit: number;
+  processed: number;
+  created: number;
+  summary: AutoReviewSummary;
+  results: Array<{
+    facility_id: string;
+    facility_name: string | null;
+    bucket: string;
+    severity: Severity;
+    reason: string;
+    recommended_next_action: string;
+  }>;
+}
+
+export interface CarePlanResponse {
+  need: {
+    capability: string | null;
+    place: string | null;
+    urgency: string;
+  };
+  recommendations: Array<{
+    facility: FacilityHit;
+    rank: number;
+    evidence_summary: string;
+    risk_label: string;
+    verification_warning: string;
+    evidence_claim_ids: string[];
+  }>;
+  call_first_checklist: string[];
+  warnings: string[];
+  export: { referral_brief_id: string };
+}
+
 export interface SSEEvent {
   type: SSEEventType;
   payload: Record<string, unknown>;

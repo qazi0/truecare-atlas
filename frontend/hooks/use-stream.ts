@@ -137,7 +137,7 @@ export function useStream() {
   );
 
   const submit = useCallback(
-    async (query: string) => {
+    async (query: string, intentContext?: Record<string, unknown>) => {
       // Cancel any in-flight stream
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -154,7 +154,7 @@ export function useStream() {
         const resp = await fetch("/api/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, intent_context: intentContext ?? null }),
           signal: controller.signal,
         });
 
