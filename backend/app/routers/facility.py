@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter
 
-from app.schemas import EvidenceClaim, FacilityFull
+from app.schemas import ContactEnrichment, EvidenceClaim, FacilityFull
+from app.services.contact_enrichment import enrich_facility_contact
 from app.services.databricks_sql import (
     query_evidence_claim,
     query_evidence_claims_for_facility,
@@ -26,6 +27,11 @@ def get_facility_evidence(facility_id: str) -> list[EvidenceClaim]:
 @router.get("/facility/{facility_id}/raw-record")
 def get_facility_raw_record(facility_id: str) -> dict:
     return query_raw_record(facility_id)
+
+
+@router.get("/facility/{facility_id}/contact-enrichment", response_model=ContactEnrichment)
+def get_facility_contact_enrichment(facility_id: str) -> ContactEnrichment:
+    return enrich_facility_contact(query_facility_by_id(facility_id))
 
 
 @router.get("/evidence/{claim_id}", response_model=EvidenceClaim)

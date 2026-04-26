@@ -80,7 +80,7 @@ export default function MissionControl() {
               MISSION CONTROL
               <span className="h-px w-6 bg-hairline" />
             </div>
-            <h1 className="text-center text-[34px] font-semibold leading-[1.05] tracking-tight md:whitespace-nowrap md:text-[40px] lg:text-[44px]">
+            <h1 className="font-hero text-center text-[38px] font-semibold italic leading-[1.02] tracking-normal md:whitespace-nowrap md:text-[46px] lg:text-[52px]">
               Know who can deliver <span className="text-primary">life-saving care.</span>
             </h1>
             <p className="mx-auto mt-4 max-w-4xl text-center text-[14px] text-muted-foreground md:whitespace-nowrap md:text-[15px]">

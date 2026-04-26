@@ -67,3 +67,37 @@ def log_search_event(
             client.post(_table_url("search_events"), headers=_headers(), json=payload)
     except Exception:
         return
+
+
+def recent_search_events(limit: int = 6) -> list[dict[str, Any]]:
+    if not _configured():
+        return []
+    safe_limit = max(1, min(int(limit or 6), 20))
+    url = _table_url("search_events")
+    params = {
+        "select": "query,intent,summary,response_facilities,created_at",
+        "order": "created_at.desc",
+        "limit": str(safe_limit),
+    }
+    try:
+        with httpx.Client(timeout=5) as client:
+            resp = client.get(url, headers=_headers(), params=params)
+        if resp.status_code >= 400:
+            return []
+        rows = resp.json()
+        if not isinstance(rows, list):
+            return []
+        unique: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            query = str(row.get("query") or "").strip()
+            key = query.lower()
+            if not query or key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        return unique
+    except Exception:
+        return []

@@ -10,8 +10,8 @@ import { AppShell, CapabilityBadge, EmptyState, Hint, StatusBadge, TrustRing } f
 import { Button } from "@/components/ui/button";
 import { EvidenceLedgerButton } from "@/components/evidence-ledger";
 import { activeEvidenceRows, addToShortlist, capabilityKeyFromQuery, capabilityLabel, deriveStatus, formatLocation, trustFlagTitle } from "@/lib/atlas";
-import { cachedJson, readClientCache, writeClientCache } from "@/lib/client-cache";
-import type { FacilityFull, FacilityHit, IntentSearchResponse, ValidatorResult } from "@/lib/types";
+import { cachedJson, writeClientCache } from "@/lib/client-cache";
+import type { FacilityFull, FacilityHit, IntentSearchResponse, RecentSearchEvent, ValidatorResult } from "@/lib/types";
 import { useStream } from "@/hooks/use-stream";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +41,7 @@ function CommandContent() {
   const router = useRouter();
   const urlQuery = params.get("q")?.trim() ?? "";
   const mode = (params.get("mode") === "deep" ? "deep" : "fast") as "fast" | "deep";
-  const [query, setQuery] = useState(() => urlQuery || readClientCache<CommandCacheState>(COMMAND_STATE_KEY)?.query || "");
+  const [query, setQuery] = useState(() => urlQuery);
   const [results, setResults] = useState<FacilityHit[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<FacilityFull | null>(null);
@@ -53,6 +53,7 @@ function CommandContent() {
   const [validationLoading, setValidationLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [recentSearches, setRecentSearches] = useState<RecentSearchEvent[]>([]);
   const stream = useStream();
 
   function notify(kind: ToastMessage["kind"], title: string, detail?: string) {
@@ -65,16 +66,19 @@ function CommandContent() {
 
   useEffect(() => {
     if (!urlQuery) {
-      const cached = readClientCache<CommandCacheState>(COMMAND_STATE_KEY);
       stream.reset();
-      setQuery(cached?.query ?? "");
-      setResults(cached?.results ?? []);
-      setSelectedId(cached?.selectedId ?? cached?.results?.[0]?.facility_id ?? null);
+      setQuery("");
+      setResults([]);
+      setSelectedId(null);
       setSelected(null);
       setValidation(null);
       setError(null);
       setPage(0);
       setLoading(false);
+      void fetch("/api/search-events/recent?limit=6")
+        .then((r) => r.ok ? r.json() : [])
+        .then((items) => setRecentSearches(Array.isArray(items) ? items : []))
+        .catch(() => setRecentSearches([]));
       return;
     }
 
@@ -285,7 +289,11 @@ function CommandContent() {
               </Button>
             </div>
           )}
-          {!loading && results.length === 0 && <div className="p-4"><EmptyState title="No live matches" detail="Try a broader capability or geography." /></div>}
+          {!loading && results.length === 0 && (
+            <div className="px-4 pb-4 pt-0">
+              {!activeQuery ? <RecentSearches searches={recentSearches} /> : <EmptyState title="No live matches" detail="Try a broader capability, city, state, pincode, or facility type." />}
+            </div>
+          )}
           <AgentActivity steps={stream.state.steps} traceId={stream.state.trace_id} isStreaming={stream.state.is_streaming} />
         </section>
         <aside className="hidden min-h-0 flex-col overflow-y-auto bg-surface lg:flex">
@@ -300,6 +308,51 @@ function ModeLink({ q, mode, active, icon: Icon }: { q: string; mode: "fast" | "
   const trimmed = q.trim();
   const href = trimmed ? `/command?q=${encodeURIComponent(trimmed)}&mode=${mode}` : `/command?mode=${mode}`;
   return <Link href={href} className={cn("inline-flex items-center gap-1 rounded-[3px] px-2 py-1 capitalize", active ? "bg-surface shadow-sm" : "text-muted-foreground")}><Icon className="h-3 w-3" /> {mode}</Link>;
+}
+
+function RecentSearches({ searches }: { searches: RecentSearchEvent[] }) {
+  const fallback = [
+    "NICU near Patna",
+    "Dialysis Chennai",
+    "Oncology Maharashtra",
+    "Maternity facilities in Kerala needing review",
+  ];
+  const items = searches.length
+    ? searches.map((item) => ({ query: item.query, summary: item.summary || searchHint(item.query), createdAt: item.created_at }))
+    : fallback.map((query) => ({ query, summary: searchHint(query), createdAt: null }));
+
+  return (
+    <div className="rounded-lg border hairline bg-surface">
+      <div className="border-b hairline px-3 py-2.5">
+        <div className="text-[13px] font-semibold">{searches.length ? "Recent searches" : "Search starting points"}</div>
+        <p className="mt-0.5 max-w-2xl text-[12px] leading-relaxed text-muted-foreground">
+          Search by capability plus place, facility name, pincode, or a review question. Use direct queries like "NICU Bihar", proximity queries like "dialysis within 50km of Chennai", or gap queries like "oncology coverage in Maharashtra".
+        </p>
+      </div>
+      <ul className="divide-y divide-hairline">
+        {items.slice(0, 6).map((item) => (
+          <li key={item.query}>
+            <Link href={`/command?q=${encodeURIComponent(item.query)}&mode=fast`} className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-muted">
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium">{item.query}</span>
+                <span className="block truncate text-[11px] text-muted-foreground">{item.summary}</span>
+              </span>
+              {item.createdAt && <span className="hidden font-mono text-[10px] text-muted-foreground md:inline">{new Date(item.createdAt).toLocaleDateString()}</span>}
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function searchHint(query: string): string {
+  if (/within|near|km/i.test(query)) return "Runs a location-aware search and ranks facilities by distance when a place resolves.";
+  if (/coverage|gap|deficit|map/i.test(query)) return "Routes to capability coverage and region-level gap analysis.";
+  if (/review|contradiction|weak/i.test(query)) return "Finds facilities where trust flags or sparse evidence need human follow-up.";
+  return "Searches live facility records by capability, place, name, pincode, and evidence text.";
 }
 
 function ResultRow({ facility, selected, onSelect, onShortlist, index }: { facility: FacilityHit; selected: boolean; onSelect: () => void; onShortlist: (id: string) => void; index: number }) {

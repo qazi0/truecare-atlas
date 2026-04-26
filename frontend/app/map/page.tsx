@@ -30,6 +30,7 @@ function MapContent() {
   const [capability, setCapability] = useState(params.get("capability") || "has_nicu");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [showReview, setShowReview] = useState(true);
+  const [deficitMode, setDeficitMode] = useState(false);
   const [region, setRegion] = useState(params.get("region") || "Bihar");
   const [regionQuery, setRegionQuery] = useState(params.get("region") || "Bihar");
   const [regionSuggestions, setRegionSuggestions] = useState<string[]>([]);
@@ -64,6 +65,21 @@ function MapContent() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    const resolved = resolveRegionName(region, aggregates, facilities) ?? region;
+    const isStateRegion = aggregates.some((row) => normalizeRegion(row.region_name) === normalizeRegion(resolved));
+    if (!isStateRegion) {
+      setSummary(buildLocalRegionSummary(resolved, capability, aggregates, facilities));
+      return;
+    }
+    void fetch(`/api/map/region-summary?region=${encodeURIComponent(resolved)}&capability=${encodeURIComponent(capability)}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.region) setSummary(data);
+      })
+      .catch(() => null);
+  }, [aggregates, capability, facilities, region]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       setRegionSuggestions(findRegionSuggestions(regionQuery, aggregates, facilities));
     }, REGION_SUGGEST_DELAY_MS);
@@ -90,7 +106,10 @@ function MapContent() {
   const national = useMemo(() => aggregates.reduce((acc, row) => ({
     claimed: acc.claimed + row.claimed_count,
     verified: acc.verified + row.verified_count,
-  }), { claimed: 0, verified: 0 }), [aggregates]);
+    zeroVerifiedRegions: acc.zeroVerifiedRegions + (row.claimed_count > 0 && row.verified_count === 0 ? 1 : 0),
+    coveredRegions: acc.coveredRegions + (row.verified_count > 0 ? 1 : 0),
+    regions: acc.regions + 1,
+  }), { claimed: 0, verified: 0, zeroVerifiedRegions: 0, coveredRegions: 0, regions: 0 }), [aggregates]);
 
   return (
     <AppShell>
@@ -105,6 +124,7 @@ function MapContent() {
           <div className="ml-auto flex items-center gap-2">
             <Toggle label="Verified only" hint="Show facilities that are currently safest to use for planning based on available evidence." on={verifiedOnly} onChange={setVerifiedOnly} />
             <Toggle label="Show review-needed" hint="Include promising facilities that should be confirmed before referral or field use." on={showReview} onChange={setShowReview} />
+            <Toggle label="Deficit map" hint="Color states by access deficit for the selected capability." on={deficitMode} onChange={setDeficitMode} />
             <div className="inline-flex rounded-md border hairline bg-surface-muted p-0.5">
               <button onClick={() => setView("map")} className={cn("inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-[11px]", view === "map" ? "bg-surface shadow-sm" : "text-muted-foreground")}><MapPin className="h-3 w-3" /> Map</button>
               <button onClick={() => setView("list")} className={cn("inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-[11px]", view === "list" ? "bg-surface shadow-sm" : "text-muted-foreground")}><List className="h-3 w-3" /> List</button>
@@ -145,7 +165,7 @@ function MapContent() {
       <div className="grid flex-1 grid-cols-1 lg:min-h-[calc(100svh-128px)] lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="relative min-h-[62vh] bg-map-water lg:min-h-0">
           {view === "map" ? (
-            <IndiaMap aggregates={aggregates} facilities={facilities} capability={capability} level="state" onRegionClick={(name) => { setRegion(name); setRegionQuery(name); }} />
+            <IndiaMap aggregates={aggregates} facilities={facilities} capability={capability} level="state" mode={deficitMode ? "deficit" : "coverage"} onRegionClick={(name) => { setRegion(name); setRegionQuery(name); }} />
           ) : (
             <ListFallback facilities={facilities} capability={capability} />
           )}
@@ -160,13 +180,18 @@ function MapContent() {
               <div className="grid grid-cols-2 gap-2 border-b hairline px-4 py-3">
                 <Metric label="Claimed" value={summary.claimed_count} />
                 <Metric label="Verified" value={summary.verified_count} tone="trust" />
-                <Metric label="Needs review" value={summary.needs_review_count} tone="caution" />
-                <Metric label="Contradictions" value={summary.contradiction_count} tone="alert" />
+                <Metric label={deficitMode ? "Deficit" : "Needs review"} value={deficitMode ? Math.max(0, summary.claimed_count - summary.verified_count) : summary.needs_review_count} tone="caution" />
+                <Metric label={deficitMode ? "Severity" : "Contradictions"} value={deficitMode ? deficitSeverityLabel(summary.verified_count, summary.claimed_count) : summary.contradiction_count} tone={deficitMode ? deficitTone(summary.verified_count, summary.claimed_count) : "alert"} />
               </div>
               <div className="border-b hairline px-4 py-3 text-[12px]">
                 <div className="flex justify-between"><span className="text-muted-foreground">Verification rate</span><span className="font-mono">{Math.round((summary.verification_rate ?? 0) * 100)}%</span></div>
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-muted"><div className="h-full bg-trust" style={{ width: `${Math.round((summary.verification_rate ?? 0) * 100)}%` }} /></div>
                 <div className="mt-1.5 text-[11px] text-muted-foreground">95% CI {Math.round((summary.ci_lower ?? 0) * 100)}% to {Math.round((summary.ci_upper ?? 0) * 100)}%</div>
+                {deficitMode && (
+                  <div className="mt-2 rounded-md border hairline bg-surface-muted px-2.5 py-2 text-[11px] text-muted-foreground">
+                    {Math.max(0, summary.claimed_count - summary.verified_count).toLocaleString()} claimed {capabilityLabel(capability).toLowerCase()} facilities need verification before this region can be treated as covered.
+                  </div>
+                )}
               </div>
               <div className="border-b hairline px-4 py-3">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Top facilities</div>
@@ -184,7 +209,13 @@ function MapContent() {
       <div className="border-t hairline bg-surface px-4 py-2.5 text-[12px]">
         <span className="mr-6 text-[10px] uppercase tracking-wider text-muted-foreground">National · {capabilityLabel(capability)}</span>
         <span className="mr-6">Claimed <strong className="font-mono">{national.claimed.toLocaleString()}</strong></span>
-        <span>Verified <strong className="font-mono text-trust">{national.verified.toLocaleString()}</strong></span>
+        <span className="mr-6">Verified <strong className="font-mono text-trust">{national.verified.toLocaleString()}</strong></span>
+        {deficitMode && (
+          <>
+            <span className="mr-6">Zero verified regions <strong className="font-mono text-alert">{national.zeroVerifiedRegions.toLocaleString()}</strong></span>
+            <span>Regions covered <strong className="font-mono text-trust">{national.regions ? Math.round((national.coveredRegions / national.regions) * 100) : 0}%</strong></span>
+          </>
+        )}
       </div>
     </AppShell>
   );
@@ -226,7 +257,7 @@ function buildLocalRegionSummary(
     capability,
     claimed_count: aggregate?.claimed_count ?? regionFacilities.length,
     verified_count: aggregate?.verified_count ?? regionFacilities.filter((facility) => facility.trust_status === "Verified").length,
-    needs_review_count: regionFacilities.filter((facility) => facility.trust_status !== "Verified").length,
+    needs_review_count: Math.max(0, (aggregate?.claimed_count ?? regionFacilities.length) - (aggregate?.verified_count ?? regionFacilities.filter((facility) => facility.trust_status === "Verified").length)),
     contradiction_count: regionFacilities.filter((facility) => facility.has_contradiction).length,
     ci_lower: aggregate?.ci_lower ?? null,
     ci_upper: aggregate?.ci_upper ?? null,
@@ -274,6 +305,21 @@ function regionNameOptions(aggregates: AggregateRowWithCI[], facilities: Facilit
 
 function normalizeRegion(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
+}
+
+function deficitSeverityLabel(verified: number, claimed: number): string {
+  const rate = claimed > 0 ? verified / claimed : 0;
+  if (claimed === 0 || verified === 0) return "Critical";
+  if (rate < 0.2) return "High";
+  if (rate < 0.5) return "Moderate";
+  return "Covered";
+}
+
+function deficitTone(verified: number, claimed: number): "trust" | "caution" | "alert" {
+  const severity = deficitSeverityLabel(verified, claimed);
+  if (severity === "Covered") return "trust";
+  if (severity === "Moderate") return "caution";
+  return "alert";
 }
 
 function Toggle({ label, hint, on, onChange }: { label: string; hint: string; on: boolean; onChange: (v: boolean) => void }) {

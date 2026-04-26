@@ -10,6 +10,7 @@ interface IndiaMapProps {
   facilities?: FacilityPoint[];
   capability: string;
   level: AggregateLevel;
+  mode?: "coverage" | "deficit";
   onRegionClick: (name: string, level: AggregateLevel) => void;
 }
 
@@ -149,11 +150,28 @@ function ratioColor(ratio: number): string {
   return "#ef4444";
 }
 
+function deficitSeverity(verified: number, claimed: number): "critical" | "high" | "moderate" | "covered" {
+  const rate = verificationRatio(verified, claimed);
+  if (claimed === 0 || verified === 0) return "critical";
+  if (rate < 0.2) return "high";
+  if (rate < 0.5) return "moderate";
+  return "covered";
+}
+
+function deficitColor(verified: number, claimed: number): string {
+  const severity = deficitSeverity(verified, claimed);
+  if (severity === "critical") return "#dc2626";
+  if (severity === "high") return "#f97316";
+  if (severity === "moderate") return "#fbbf24";
+  return "#2f8f5b";
+}
+
 export function IndiaMap({
   aggregates,
   facilities = [],
   capability,
   level,
+  mode = "coverage",
   onRegionClick,
 }: IndiaMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -161,6 +179,7 @@ export function IndiaMap({
   const popupRef = useRef<mapboxgl.Popup | null>(null);
   const facilitiesRef = useRef<FacilityPoint[]>(facilities);
   const capabilityRef = useRef(capability);
+  const modeRef = useRef(mode);
   const activeFacilityPopupRef = useRef<string | null>(null);
   const [selectedFacility, setSelectedFacility] = useState<SelectedFacilityCard | null>(null);
   const [overlay, setOverlay] = useState<{
@@ -193,7 +212,8 @@ export function IndiaMap({
               claimed: row.claimed_count,
               verified: row.verified_count,
               ratio,
-              color: ratioColor(ratio),
+              color: modeRef.current === "deficit" ? deficitColor(row.verified_count, row.claimed_count) : ratioColor(ratio),
+              severity: deficitSeverity(row.verified_count, row.claimed_count),
               radius: Math.max(8, Math.min(35, Math.sqrt(row.claimed_count) * 3)),
               per_100k: row.per_100k ?? 0,
               level: row.region_level,
@@ -211,6 +231,10 @@ export function IndiaMap({
   useEffect(() => {
     capabilityRef.current = capability;
   }, [capability]);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   const updateOverlay = useCallback(() => {
     const map = mapRef.current;
@@ -418,6 +442,7 @@ export function IndiaMap({
     const popup = new mapboxgl.Popup({
       closeButton: false,
       closeOnClick: false,
+      className: "atlas-map-hover-popup",
       offset: 14,
       maxWidth: "280px",
     });
@@ -438,8 +463,10 @@ export function IndiaMap({
         .setHTML(
           `<div style="font-family:system-ui;font-size:12px;line-height:1.5;min-width:120px">` +
             `<strong>${p.name}</strong><br/>` +
-            `<span style="color:${p.color};font-weight:600">${pct}%</span> verified<br/>` +
-            `${p.verified}/${p.claimed} facilities` +
+            (modeRef.current === "deficit"
+              ? `<span style="color:${p.color};font-weight:600">${String(p.severity).replace(/^./, (c) => c.toUpperCase())}</span> deficit<br/>`
+              : `<span style="color:${p.color};font-weight:600">${pct}%</span> verified<br/>`) +
+            `${p.verified}/${p.claimed} verified` +
             (p.per_100k > 0
               ? `<br/><span style="color:#6b7280">${Number(p.per_100k).toFixed(1)}/100k pop.</span>`
               : "") +
@@ -492,13 +519,16 @@ export function IndiaMap({
     // --- Facility dot interactions ---
     map.on("mouseenter", "facility-hit-targets", () => {
       map.getCanvas().style.cursor = "pointer";
+      if (map.dragPan.isEnabled()) map.dragPan.disable();
     });
 
     map.on("mouseleave", "facility-hit-targets", () => {
       map.getCanvas().style.cursor = "";
+      if (!map.dragPan.isEnabled()) map.dragPan.enable();
     });
 
     map.on("click", "facility-hit-targets", (e) => {
+      e.preventDefault();
       const f = e.features?.[0];
       if (!f?.properties) return;
       const coordinates = (f.geometry as GeoJSON.Point).coordinates as [number, number];
@@ -517,6 +547,7 @@ export function IndiaMap({
 
     return () => {
       resizeObserver.disconnect();
+      if (!map.dragPan.isEnabled()) map.dragPan.enable();
       popup.remove();
       map.remove();
       mapRef.current = null;
@@ -542,7 +573,7 @@ export function IndiaMap({
     } else {
       map.once("load", updateSource);
     }
-  }, [aggregates, buildGeoJSON]);
+  }, [aggregates, buildGeoJSON, mode]);
 
   // Update facility and city points when data arrives
   useEffect(() => {
@@ -578,11 +609,20 @@ export function IndiaMap({
         <span className="inline-flex h-5 items-center rounded-md border hairline bg-surface px-2 font-mono text-xs">
           {CAPABILITY_OPTIONS.find((o) => o.key === capability)?.label ?? capability}
         </span>
-        <span className="flex items-center gap-3">
-          <LegendDot color="#10b981" label="≥70%" />
-          <LegendDot color="#fbbf24" label="40–69%" />
-          <LegendDot color="#ef4444" label="<40%" />
-        </span>
+        {mode === "deficit" ? (
+          <span className="flex items-center gap-3">
+            <LegendDot color="#dc2626" label="Critical" />
+            <LegendDot color="#f97316" label="High" />
+            <LegendDot color="#fbbf24" label="Moderate" />
+            <LegendDot color="#2f8f5b" label="Covered" />
+          </span>
+        ) : (
+          <span className="flex items-center gap-3">
+            <LegendDot color="#10b981" label="≥70%" />
+            <LegendDot color="#fbbf24" label="40–69%" />
+            <LegendDot color="#ef4444" label="<40%" />
+          </span>
+        )}
         <span className="text-xs text-text-muted ml-auto font-mono tabular-nums">
           {totalVerified}/{totalClaimed} verified nationally
         </span>

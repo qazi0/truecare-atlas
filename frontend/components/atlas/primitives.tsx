@@ -6,12 +6,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { Activity, AlertOctagon, CheckCircle2, ChevronRight, Database, ListChecks, Map, Route, Search, ShieldCheck } from "lucide-react";
+import { Activity, AlertOctagon, Building2, CheckCircle2, ChevronRight, Database, ListChecks, Map, Route, Search, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FacilityStatus } from "@/lib/atlas";
 
 const NAV = [
-  { to: "/command", label: "Search", icon: Search },
+  { to: "/command", label: "Smart Search", icon: Search },
+  { to: "/clinics", label: "All Clinics", icon: Building2 },
   { to: "/map", label: "Map", icon: Map },
   { to: "/planner", label: "Planner", icon: Route },
   { to: "/shortlist", label: "Shortlist", icon: ListChecks },
@@ -143,7 +144,7 @@ function MobileBottomNav() {
   const pathname = usePathname();
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t hairline bg-background/95 backdrop-blur">
-      <ul className="grid grid-cols-6">
+      <ul className="grid grid-cols-7">
         {NAV.map((item) => {
           const active = pathname.startsWith(item.to);
           const Icon = item.icon;

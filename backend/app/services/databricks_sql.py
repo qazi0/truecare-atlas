@@ -1,5 +1,6 @@
 """Databricks SQL query helpers — all sync, intended to run in asyncio executor."""
 
+import base64
 import json
 import math
 import re
@@ -13,8 +14,10 @@ from app.schemas import (
     AggregateLevel,
     AggregateRow,
     AggregateRowWithCI,
+    ClinicsPageResponse,
     Capability,
     Confidence,
+    ContactLink,
     EvidenceClaim,
     FacilityCapabilities,
     FacilityFilters,
@@ -103,6 +106,68 @@ def _clean_str(s: str | None) -> str | None:
     return _CTRL_CHAR_RE.sub("", s) if s else s
 
 
+def _to_str_list(val: Any) -> list[str]:
+    if val is None:
+        return []
+    if hasattr(val, "tolist"):
+        val = val.tolist()
+    if isinstance(val, list):
+        return [_clean_str(str(x)) or "" for x in val if x]
+    if isinstance(val, tuple):
+        return [_clean_str(str(x)) or "" for x in val if x]
+    if isinstance(val, str) and val.strip():
+        stripped = val.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            quoted_items = re.findall(r"'([^']*)'|\"([^\"]*)\"", stripped)
+            parsed = [single or double for single, double in quoted_items]
+            if parsed:
+                return [_clean_str(item.strip()) or "" for item in parsed if item.strip()]
+        return [_clean_str(stripped) or ""]
+    return []
+
+
+def _normalize_url(url: str | None) -> str | None:
+    cleaned = _clean_str(url.strip()) if isinstance(url, str) else None
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    if cleaned.startswith(("http://", "https://")):
+        return cleaned
+    return f"https://{cleaned}"
+
+
+def _primary_phone(row: dict) -> str | None:
+    official = _clean_str(row.get("official_phone"))
+    if official:
+        return official
+    phones = _to_str_list(row.get("phone_numbers"))
+    return ", ".join(phones) if phones else None
+
+
+def _primary_website(row: dict) -> str | None:
+    official = _normalize_url(row.get("official_website"))
+    if official:
+        return official
+    for site in _to_str_list(row.get("websites")):
+        normalized = _normalize_url(site)
+        if normalized:
+            return normalized
+    return None
+
+
+def _social_links(row: dict) -> list[ContactLink]:
+    links: list[ContactLink] = []
+    for kind, label, col in [
+        ("facebook", "Facebook", "facebook_link"),
+        ("twitter", "X / Twitter", "twitter_link"),
+        ("linkedin", "LinkedIn", "linkedin_link"),
+        ("instagram", "Instagram", "instagram_link"),
+    ]:
+        url = _normalize_url(row.get(col))
+        if url:
+            links.append(ContactLink(kind=kind, label=label, url=url))
+    return links
+
+
 def _row_to_capabilities(row: dict) -> FacilityCapabilities:
     """Build FacilityCapabilities from a gold_facility_trust row."""
     caps: dict[str, Capability] = {}
@@ -153,9 +218,23 @@ def _trust_status(row: dict) -> str:
     score = row.get("trust_score")
     if flag_count > 0:
         return "Needs review"
+    if not any(bool(row.get(col)) for col in _CAP_COLS):
+        return "Evidence weak"
     if score is not None and int(score) < 60:
         return "Evidence weak"
     return "Verified"
+
+
+def _display_trust_score(row: dict) -> int | None:
+    score = row.get("trust_score")
+    if score is None:
+        return None
+    score = int(score)
+    if not any(bool(row.get(col)) for col in _CAP_COLS):
+        return min(score, 50)
+    if _trust_status(row) == "Evidence weak":
+        return min(score, 59)
+    return score
 
 
 def _row_to_facility_hit(row: dict, distance_km: float | None = None) -> FacilityHit:
@@ -168,12 +247,15 @@ def _row_to_facility_hit(row: dict, distance_km: float | None = None) -> Facilit
         latitude=float(row["latitude"]) if row.get("latitude") is not None else None,
         longitude=float(row["longitude"]) if row.get("longitude") is not None else None,
         facility_type=row.get("facility_type_id"),
-        trust_score=row.get("trust_score"),
+        trust_score=_display_trust_score(row),
         distance_km=distance_km,
         capabilities=_row_to_capabilities(row),
         flag_count=int(row.get("flag_count") or 0),
         has_contradiction=bool(row.get("r6_modality_contradiction")),
         trust_status=_trust_status(row),
+        phone=_primary_phone(row),
+        website=_primary_website(row),
+        social_links=_social_links(row),
     )
 
 
@@ -207,7 +289,7 @@ def _row_to_trust_report(row: dict) -> TrustReport:
             ))
     return TrustReport(
         facility_id=row["facility_id"],
-        score=row.get("trust_score") or 0,
+        score=_display_trust_score(row) or 0,
         flags=flags,
     )
 
@@ -410,6 +492,140 @@ def normalize_capability(value: str | None) -> str | None:
     return normalized if normalized in _CAP_COLS else None
 
 
+def _encode_clinics_cursor(name: str, facility_id: str) -> str:
+    payload = json.dumps({"last_name": name, "last_facility_id": facility_id}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def _decode_clinics_cursor(cursor: str | None) -> tuple[str, str] | None:
+    if not cursor:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        data = json.loads(raw)
+        last_name = data.get("last_name")
+        last_facility_id = data.get("last_facility_id")
+        if isinstance(last_name, str) and isinstance(last_facility_id, str):
+            return last_name, last_facility_id
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def query_clinics_page(
+    q: str | None = None,
+    capability: str | None = None,
+    state: str | None = None,
+    city: str | None = None,
+    status: str | None = None,
+    limit: int = 10,
+    cursor: str | None = None,
+) -> ClinicsPageResponse:
+    """SQL-only paginated facility explorer query."""
+    safe_limit = max(1, min(int(limit or 10), 50))
+    clauses: list[str] = ["1 = 1"]
+    params: list[Any] = []
+    q_clean = (q or "").strip()
+
+    if q_clean:
+        searchable = """
+            LOWER(CONCAT(
+                COALESCE(t.name, ''), ' ',
+                COALESCE(t.city, ''), ' ',
+                COALESCE(t.state_canon, ''), ' ',
+                COALESCE(t.pincode, ''), ' ',
+                COALESCE(t.facility_type_id, ''), ' ',
+                COALESCE(t.capabilities_caption, ''), ' ',
+                COALESCE(s.description, ''), ' ',
+                COALESCE(CONCAT_WS(' ', s.phone_numbers), ''), ' ',
+                COALESCE(s.address_line1, ''), ' ',
+                COALESCE(s.address_line2, ''), ' ',
+                COALESCE(s.address_line3, '')
+            ))
+        """
+        terms = [term for term in re.split(r"\s+", q_clean.lower()) if len(term) >= 2]
+        for term in terms:
+            clauses.append(f"{searchable} LIKE ?")
+            params.append(f"%{term}%")
+
+    normalized_capability = normalize_capability(capability)
+    if normalized_capability:
+        clauses.append(f"t.{normalized_capability} = TRUE")
+
+    if state and state.strip():
+        clauses.append("LOWER(t.state_canon) LIKE ?")
+        params.append(f"%{state.strip().lower()}%")
+
+    if city and city.strip():
+        clauses.append("LOWER(t.city) LIKE ?")
+        params.append(f"%{city.strip().lower()}%")
+
+    status_key = (status or "").strip().lower()
+    if status_key == "verified":
+        clauses.append("t.trust_score >= 80")
+        clauses.append("COALESCE(t.flag_count, 0) = 0")
+        clauses.append("COALESCE(t.r6_modality_contradiction, FALSE) = FALSE")
+    elif status_key == "needs_review":
+        clauses.append("COALESCE(t.flag_count, 0) > 0")
+    elif status_key == "contradiction":
+        clauses.append("COALESCE(t.r6_modality_contradiction, FALSE) = TRUE")
+    elif status_key == "evidence_weak":
+        clauses.append("t.trust_score < 60")
+
+    decoded_cursor = _decode_clinics_cursor(cursor)
+    if decoded_cursor:
+        last_name, last_facility_id = decoded_cursor
+        clauses.append("(LOWER(t.name) > LOWER(?) OR (LOWER(t.name) = LOWER(?) AND t.facility_id > ?))")
+        params.extend([last_name, last_name, last_facility_id])
+
+    where_clause = " AND ".join(clauses)
+    rows = _execute(
+        f"""
+        SELECT
+            t.*,
+            s.official_phone,
+            s.email,
+            s.official_website,
+            s.phone_numbers,
+            s.websites,
+            s.facebook_link,
+            s.twitter_link,
+            s.linkedin_link,
+            s.instagram_link
+        FROM workspace.default.gold_facility_trust t
+        LEFT JOIN workspace.default.silver_facility s
+            ON t.facility_id = s.facility_id
+        WHERE {where_clause}
+        ORDER BY LOWER(t.name) ASC, t.facility_id ASC
+        LIMIT {safe_limit + 1}
+        """,
+        params,
+    )
+    items = [_row_to_facility_hit(row) for row in rows[:safe_limit]]
+    next_cursor = None
+    if len(rows) > safe_limit and items:
+        last = items[-1]
+        next_cursor = _encode_clinics_cursor(last.name, last.facility_id)
+
+    count_clauses = clauses[:]
+    count_params = params[:]
+    if decoded_cursor:
+        count_clauses = count_clauses[:-1]
+        count_params = count_params[:-3]
+    count_rows = _execute(
+        f"""
+        SELECT COUNT(*) AS total_estimate
+        FROM workspace.default.gold_facility_trust t
+        LEFT JOIN workspace.default.silver_facility s
+            ON t.facility_id = s.facility_id
+        WHERE {" AND ".join(count_clauses)}
+        """,
+        count_params,
+    )
+    total_estimate = int(count_rows[0].get("total_estimate") or 0) if count_rows else None
+    return ClinicsPageResponse(items=items, next_cursor=next_cursor, total_estimate=total_estimate)
+
+
 def query_facilities_by_capability(
     flags: list[str],
     filters: FacilityFilters | None = None,
@@ -459,7 +675,15 @@ def query_facility_by_id(facility_id: str) -> FacilityFull:
         SELECT
             t.*,
             s.description,
+            s.official_phone,
+            s.email,
+            s.official_website,
             s.phone_numbers,
+            s.websites,
+            s.facebook_link,
+            s.twitter_link,
+            s.linkedin_link,
+            s.instagram_link,
             s.address_line1,
             s.address_line2,
             s.address_line3,
@@ -484,29 +708,24 @@ def query_facility_by_id(facility_id: str) -> FacilityFull:
     addr_parts = [row.get("address_line1"), row.get("address_line2"), row.get("address_line3")]
     address = ", ".join(p for p in addr_parts if p)
 
-    def _to_list(val: Any) -> list[str]:
-        if val is None:
-            return []
-        if isinstance(val, list):
-            return [str(x) for x in val if x]
-        return []
-
     raw_desc = row.get("description")
-    phone_raw = row.get("phone_numbers")
-    if phone_raw is not None and hasattr(phone_raw, "__iter__") and not isinstance(phone_raw, str):
-        phone = ", ".join(str(x) for x in phone_raw)
-    else:
-        phone = str(phone_raw) if phone_raw else None
 
     return FacilityFull(
         **hit.model_dump(),
         description=_clean_str(raw_desc),
-        phone=phone,
         address=address or None,
-        specialties=_to_list(row.get("specialties")),
-        procedures=_to_list(row.get("procedures")),
-        equipment=_to_list(row.get("equipment")),
-        capability_text=_to_list(row.get("silver_capabilities")),
+        email=_clean_str(row.get("email")),
+        official_phone=_clean_str(row.get("official_phone")),
+        official_website=_primary_website({"official_website": row.get("official_website")}),
+        websites=[
+            normalized
+            for site in _to_str_list(row.get("websites"))
+            if (normalized := _normalize_url(site))
+        ],
+        specialties=_to_str_list(row.get("specialties")),
+        procedures=_to_str_list(row.get("procedures")),
+        equipment=_to_str_list(row.get("equipment")),
+        capability_text=_to_str_list(row.get("silver_capabilities")),
         trust_report=trust_report,
     )
 
@@ -641,36 +860,31 @@ def query_trust_report(facility_id: str) -> TrustReport:
 
 def query_aggregates(level: AggregateLevel, capability: str) -> list[AggregateRow]:
     """Read pre-computed rollups from gold_state_aggregates or gold_pincode_aggregates."""
-    # Map capability name to claimed/verified column pairs
-    cap_map = {
-        "has_icu":               ("icu_claimed",               "icu_verified"),
-        "has_nicu":              ("nicu_claimed",              "nicu_verified"),
-        "has_dialysis":          ("dialysis_claimed",          "dialysis_verified"),
-        "has_oncology":          ("oncology_claimed",          "oncology_verified"),
-        "has_maternity":         ("maternity_claimed",         "maternity_verified"),
-        "has_trauma":            ("trauma_claimed",            "trauma_verified"),
-        "has_emergency_surgery": ("emergency_surgery_claimed", "emergency_surgery_claimed"),
-        "has_24x7":              ("h24x7_claimed",             "h24x7_claimed"),
-        "has_blood_bank":        ("blood_bank_claimed",        "blood_bank_claimed"),
-        "has_cardiac_cath_lab":  ("cardiac_cath_lab_claimed",  "cardiac_cath_lab_claimed"),
-    }
-    claimed_col, verified_col = cap_map.get(capability, ("icu_claimed", "icu_verified"))
-
+    normalized_capability = normalize_capability(capability) or "has_icu"
     if level == AggregateLevel.STATE:
-        sql = f"""
+        rows = _execute(
+            f"""
             SELECT
                 state_canon AS region_name,
-                {claimed_col} AS claimed_count,
-                {verified_col} AS verified_count
-            FROM workspace.default.gold_state_aggregates
-            ORDER BY claimed_count DESC
-        """
-        rows = _execute(sql)
+                COUNT(*) AS total_facilities,
+                SUM(CASE WHEN {normalized_capability} THEN 1 ELSE 0 END) AS claimed_count,
+                SUM(CASE
+                    WHEN {normalized_capability}
+                        AND trust_score >= 80
+                        AND COALESCE(flag_count, 0) = 0
+                        AND COALESCE(r6_modality_contradiction, FALSE) = FALSE
+                    THEN 1 ELSE 0
+                END) AS verified_count
+            FROM workspace.default.gold_facility_trust
+            GROUP BY state_canon
+            ORDER BY claimed_count DESC, region_name ASC
+            """
+        )
         return [
             AggregateRow(
                 region_name=r["region_name"],
                 region_level=AggregateLevel.STATE,
-                capability=capability,
+                capability=normalized_capability,
                 claimed_count=r["claimed_count"] or 0,
                 verified_count=r["verified_count"] or 0,
             )
@@ -683,7 +897,7 @@ def query_aggregates(level: AggregateLevel, capability: str) -> list[AggregateRo
             pincode AS region_name,
             state_canon,
             city,
-            {_pincode_col(capability)} AS claimed_count
+            {_pincode_col(normalized_capability)} AS claimed_count
         FROM workspace.default.gold_pincode_aggregates
         ORDER BY claimed_count DESC
         LIMIT 500
@@ -693,7 +907,7 @@ def query_aggregates(level: AggregateLevel, capability: str) -> list[AggregateRo
         AggregateRow(
             region_name=r["region_name"],
             region_level=AggregateLevel.PINCODE,
-            capability=capability,
+            capability=normalized_capability,
             claimed_count=r["claimed_count"] or 0,
             # pincode table has no separate verified column
             verified_count=r["claimed_count"] or 0,
@@ -768,19 +982,25 @@ def query_map_facilities(
         if normalized not in _CAP_COLS:
             normalized = None
     clauses = ["latitude IS NOT NULL", "longitude IS NOT NULL"]
+    capability_presence_clause = "(" + " OR ".join(f"{col} = TRUE" for col in _CAP_COLS) + ")"
     if normalized:
         clauses.append(f"{normalized} = TRUE")
     if verified_only:
         clauses.append("trust_score >= 80")
         clauses.append("COALESCE(flag_count, 0) = 0")
         clauses.append("COALESCE(r6_modality_contradiction, FALSE) = FALSE")
+        clauses.append(capability_presence_clause)
     if not show_review_needed:
         clauses.append("COALESCE(flag_count, 0) = 0")
         clauses.append("trust_score >= 60")
+        clauses.append(capability_presence_clause)
     sql = f"""
         SELECT facility_id, name, latitude, longitude, trust_score,
                trust_score_bucket, facility_type_id, state_canon, city,
-               flag_count, r6_modality_contradiction
+               flag_count, r6_modality_contradiction,
+               has_icu, has_nicu, has_dialysis, has_oncology,
+               has_emergency_surgery, has_24x7, has_maternity,
+               has_blood_bank, has_anesthesia, has_trauma, has_cardiac_cath_lab
         FROM workspace.default.gold_facility_trust
         WHERE {" AND ".join(clauses)}
         ORDER BY trust_score DESC
@@ -793,7 +1013,7 @@ def query_map_facilities(
             "name": _clean_str(r["name"]) or "",
             "lat": float(r["latitude"]),
             "lng": float(r["longitude"]),
-            "trust_score": r.get("trust_score"),
+            "trust_score": _display_trust_score(r),
             "trust_bucket": r.get("trust_score_bucket", "unknown"),
             "type": r.get("facility_type_id"),
             "state": _clean_str(r.get("state_canon")),
@@ -816,8 +1036,8 @@ def query_region_summary(region: str, capability: str = "has_nicu") -> RegionSum
         f"""
         SELECT
             COUNT(*) AS claimed_count,
-            SUM(CASE WHEN trust_score >= 80 AND COALESCE(flag_count, 0) = 0 THEN 1 ELSE 0 END) AS verified_count,
-            SUM(CASE WHEN COALESCE(flag_count, 0) > 0 OR trust_score < 80 THEN 1 ELSE 0 END) AS needs_review_count,
+            SUM(CASE WHEN trust_score >= 80 AND COALESCE(flag_count, 0) = 0 AND COALESCE(r6_modality_contradiction, FALSE) = FALSE THEN 1 ELSE 0 END) AS verified_count,
+            SUM(CASE WHEN COALESCE(flag_count, 0) > 0 OR trust_score < 80 OR COALESCE(r6_modality_contradiction, FALSE) THEN 1 ELSE 0 END) AS needs_review_count,
             SUM(CASE WHEN COALESCE(r6_modality_contradiction, FALSE) THEN 1 ELSE 0 END) AS contradiction_count
         FROM workspace.default.gold_facility_trust
         WHERE state_canon = ? AND {normalized} = TRUE
@@ -939,7 +1159,7 @@ def query_data_health_metrics() -> dict:
         SELECT
             COUNT(*) AS total_facilities,
             AVG(trust_score) AS avg_trust_score,
-            SUM(CASE WHEN trust_score >= 80 AND COALESCE(flag_count, 0) = 0 THEN 1 ELSE 0 END) AS high_trust,
+            SUM(CASE WHEN trust_score >= 80 AND COALESCE(flag_count, 0) = 0 AND COALESCE(r6_modality_contradiction, FALSE) = FALSE THEN 1 ELSE 0 END) AS high_trust,
             SUM(CASE WHEN trust_score >= 50 AND trust_score < 80 THEN 1 ELSE 0 END) AS medium_trust,
             SUM(CASE WHEN trust_score < 50 THEN 1 ELSE 0 END) AS low_trust,
             SUM(CASE WHEN flag_count > 0 THEN 1 ELSE 0 END) AS review_needed,

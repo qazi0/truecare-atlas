@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono, Geist } from "next/font/google";
+import { Geist, Inter, JetBrains_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -16,6 +16,13 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
   weight: ["400", "500"],
+});
+
+const newsreader = Newsreader({
+  variable: "--font-hero",
+  subsets: ["latin"],
+  style: ["italic"],
+  weight: ["500", "600"],
 });
 
 export const metadata: Metadata = {
@@ -36,7 +43,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={cn("h-full", "antialiased", inter.variable, jetbrainsMono.variable, "font-sans", geist.variable)}
+      className={cn("h-full", "antialiased", inter.variable, jetbrainsMono.variable, newsreader.variable, "font-sans", geist.variable)}
     >
       <body className="min-h-full flex flex-col bg-base text-text">
         <TooltipProvider>{children}</TooltipProvider>

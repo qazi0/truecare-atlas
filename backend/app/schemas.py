@@ -84,6 +84,12 @@ class TrustReport(BaseModel):
     flags: list[TrustFlag] = []
 
 
+class ContactLink(BaseModel):
+    kind: str
+    label: str
+    url: str
+
+
 class FacilityHit(BaseModel):
     facility_id: str
     name: str
@@ -99,12 +105,18 @@ class FacilityHit(BaseModel):
     flag_count: int | None = None
     has_contradiction: bool | None = None
     trust_status: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    social_links: list[ContactLink] = []
 
 
 class FacilityFull(FacilityHit):
     description: str | None = None
-    phone: str | None = None
     address: str | None = None
+    email: str | None = None
+    official_phone: str | None = None
+    official_website: str | None = None
+    websites: list[str] = []
     specialties: list[str] = []
     procedures: list[str] = []
     equipment: list[str] = []
@@ -178,6 +190,20 @@ class NearbySearchResponse(BaseModel):
     radius_km: float
     capability: str | None = None
     facilities: list[FacilityHit]
+
+
+class ContactEnrichment(BaseModel):
+    facility_id: str
+    query: str
+    found_contacts: list[ContactLink] = []
+    snippets: list[str] = []
+    sources: list[str] = []
+
+
+class ClinicsPageResponse(BaseModel):
+    items: list[FacilityHit]
+    next_cursor: str | None = None
+    total_estimate: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +286,14 @@ class RecentTrace(BaseModel):
     duration_ms: int | None = None
     started_at: str | None = None
     steps: int | None = None
+
+
+class RecentSearchEvent(BaseModel):
+    query: str
+    intent: str | None = None
+    summary: str | None = None
+    created_at: str | None = None
+    response_facilities: list[dict[str, Any]] = []
 
 
 class EvidenceClaim(BaseModel):

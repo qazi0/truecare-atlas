@@ -10,6 +10,7 @@ from app.settings import settings
 from app.routers import (
     audit,
     care_plan,
+    clinics,
     data_health,
     export,
     facility,
@@ -45,6 +46,7 @@ app.add_middleware(
 app.include_router(search.router, prefix="/api")
 app.include_router(intent.router, prefix="/api")
 app.include_router(care_plan.router, prefix="/api")
+app.include_router(clinics.router, prefix="/api")
 app.include_router(facility.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(map_routes.router, prefix="/api")

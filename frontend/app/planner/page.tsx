@@ -55,8 +55,8 @@ export default function PlannerPage() {
 
   return (
     <AppShell>
-      <div className="sticky top-12 z-30 border-b hairline bg-background px-4 py-3">
-        <form onSubmit={submit} className="grid max-w-[820px] grid-cols-1 items-center gap-2 sm:grid-cols-[minmax(280px,1fr)_auto]">
+      <div className="sticky top-12 z-30 border-b hairline bg-background px-5 py-3">
+        <form onSubmit={submit} className="grid grid-cols-1 items-center gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
           <div className="flex h-9 min-w-[280px] items-center gap-2 rounded-md border hairline bg-surface px-3 focus-within:ring-2 focus-within:ring-primary/30">
             <Search className="h-4 w-4 text-muted-foreground" />
             <div className="relative min-w-0 flex-1">
@@ -69,7 +69,7 @@ export default function PlannerPage() {
             </div>
           </div>
           <Hint text="Creates a practical referral plan with nearby options, confidence signals, and call-first safety checks.">
-            <Button type="submit" size="sm" className="h-9" disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />} Plan care access</Button>
+            <Button type="submit" size="sm" className="h-9 w-full" disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />} Plan care access</Button>
           </Hint>
         </form>
       </div>

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     review_queue_path: str = "/tmp/truecare_atlas_review_queue.json"
     supabase_url: str = ""
     supabase_service_role_key: str = ""
+    tavily_api_key: str = ""
     cors_origins: list[str] = [
         "http://localhost:3000",
         "https://*.vercel.app",

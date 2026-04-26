@@ -69,17 +69,51 @@ export interface FacilityHit {
   flag_count?: number | null;
   has_contradiction?: boolean | null;
   trust_status?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  social_links?: ContactLink[];
 }
 
 export interface FacilityFull extends FacilityHit {
   description: string | null;
-  phone: string | null;
   address: string | null;
+  email: string | null;
+  official_phone: string | null;
+  official_website: string | null;
+  websites: string[];
   specialties: string[];
   procedures: string[];
   equipment: string[];
   capability_text: string[];
   trust_report: TrustReport | null;
+}
+
+export interface ContactLink {
+  kind: string;
+  label: string;
+  url: string;
+}
+
+export interface RecentSearchEvent {
+  query: string;
+  intent: string | null;
+  summary: string | null;
+  created_at: string | null;
+  response_facilities: Array<Record<string, unknown>>;
+}
+
+export interface ContactEnrichment {
+  facility_id: string;
+  query: string;
+  found_contacts: ContactLink[];
+  snippets: string[];
+  sources: string[];
+}
+
+export interface ClinicsPageResponse {
+  items: FacilityHit[];
+  next_cursor: string | null;
+  total_estimate: number | null;
 }
 
 export interface AggregateRow {
