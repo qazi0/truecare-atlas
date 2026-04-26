@@ -42,7 +42,7 @@ No need for Pandas UDFs or concurrency tuning. Databricks internally batches, re
 
 ### Always run discover-schema before writing queries
 ```bash
-databricks experimental aitools tools discover-schema workspace.default.<table> --profile siraj-workspace
+databricks experimental aitools tools discover-schema workspace.default.<table> --profile sj-wksp
 ```
 Column names in the actual table often differ from what you'd guess. Example: the silver table has `facility_type_id` not `facility_class`, `capabilities` not `capability_text`.
 
@@ -141,7 +141,7 @@ Databricks uses Java regex (not Python). Key differences:
 ### Query output through CLI can be large
 Always pipe through `| head -N` or use `LIMIT` in SQL:
 ```bash
-databricks experimental aitools tools query "SELECT ... LIMIT 5" --profile siraj-workspace 2>&1 | head -20
+databricks experimental aitools tools query "SELECT ... LIMIT 5" --profile sj-wksp 2>&1 | head -20
 ```
 
 ---

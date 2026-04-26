@@ -1,7 +1,5 @@
 import { NextRequest } from "next/server";
-
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+import { BACKEND_URL, backendHeaders } from "@/lib/backend";
 
 // Proxy POST /api/search to backend, streaming SSE through
 export async function POST(request: NextRequest) {
@@ -9,10 +7,10 @@ export async function POST(request: NextRequest) {
 
   const backendResp = await fetch(`${BACKEND_URL}/api/search`, {
     method: "POST",
-    headers: {
+    headers: await backendHeaders({
       "Content-Type": "application/json",
       Accept: "text/event-stream",
-    },
+    }),
     body,
   });
 

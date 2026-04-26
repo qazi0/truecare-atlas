@@ -7,7 +7,7 @@ import type { AggregateRow, AggregateLevel } from "@/lib/types";
 export default function MapPage() {
   const [aggregates, setAggregates] = useState<AggregateRow[]>([]);
   const [capability, setCapability] = useState("has_nicu");
-  const [level, setLevel] = useState<AggregateLevel>("state");
+  const [level] = useState<AggregateLevel>("state");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,7 +32,11 @@ export default function MapPage() {
   );
 
   useEffect(() => {
-    fetchAggregates(capability, level);
+    const timeout = window.setTimeout(() => {
+      void fetchAggregates(capability, level);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
   }, [capability, level, fetchAggregates]);
 
   const handleRegionClick = (name: string, clickedLevel: AggregateLevel) => {

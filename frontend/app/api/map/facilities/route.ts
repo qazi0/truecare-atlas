@@ -1,11 +1,8 @@
-import { NextRequest } from "next/server";
+import { BACKEND_URL, backendHeaders } from "@/lib/backend";
 
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-
-export async function GET(_request: NextRequest) {
+export async function GET() {
   const resp = await fetch(`${BACKEND_URL}/api/map/facilities`, {
-    headers: { Accept: "application/json" },
+    headers: await backendHeaders({ Accept: "application/json" }),
   });
   const data = await resp.json();
   return Response.json(data, { status: resp.status });

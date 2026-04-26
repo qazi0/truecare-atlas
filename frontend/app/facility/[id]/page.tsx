@@ -1,6 +1,7 @@
 import { TrustPanel } from "@/components/trust-panel";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { BACKEND_URL, backendHeaders } from "@/lib/backend";
 import type { FacilityFull } from "@/lib/types";
 
 interface Props {
@@ -8,11 +9,10 @@ interface Props {
 }
 
 async function fetchFacility(id: string): Promise<FacilityFull | null> {
-  const backendUrl =
-    process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
   try {
-    const resp = await fetch(`${backendUrl}/api/facility/${encodeURIComponent(id)}`, {
+    const resp = await fetch(`${BACKEND_URL}/api/facility/${encodeURIComponent(id)}`, {
       cache: "no-store",
+      headers: await backendHeaders({ Accept: "application/json" }),
     });
     if (!resp.ok) return null;
     return resp.json();

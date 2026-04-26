@@ -34,7 +34,11 @@ export function MapView() {
   );
 
   useEffect(() => {
-    fetchAggregates(capability, level);
+    const timeout = window.setTimeout(() => {
+      void fetchAggregates(capability, level);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
   }, [capability, level, fetchAggregates]);
 
   // Fetch facility points once (they don't change with capability)

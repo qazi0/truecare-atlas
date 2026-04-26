@@ -1,7 +1,5 @@
 import { NextRequest } from "next/server";
-
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+import { BACKEND_URL, backendHeaders } from "@/lib/backend";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -13,7 +11,7 @@ export async function GET(request: NextRequest) {
 
   const backendResp = await fetch(
     `${BACKEND_URL}/api/audit/${encodeURIComponent(id)}`,
-    { headers: { Accept: "application/json" } }
+    { headers: await backendHeaders({ Accept: "application/json" }) }
   );
 
   const data = await backendResp.json();

@@ -16,7 +16,7 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://dbc-842dd1eb-38c2.cloud.databricks.com
+      host: https://dbc-d744432c-1635.cloud.databricks.com
     variables:
       catalog: workspace
       schema: default
@@ -24,7 +24,7 @@ targets:
   prod:
     mode: production
     workspace:
-      host: https://dbc-842dd1eb-38c2.cloud.databricks.com
+      host: https://dbc-d744432c-1635.cloud.databricks.com
       root_path: /Workspace/Users/fullbridgerectifier@gmail.com/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: workspace

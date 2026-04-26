@@ -17,231 +17,42 @@
 
 -- COMMAND ----------
 
--- Cell 2: State alias lookup table
--- Every alias is case-sensitive and matched exactly as found in the data.
-
-CREATE OR REPLACE TEMPORARY VIEW state_alias_map AS
-SELECT alias, canonical FROM VALUES
-  -- Maharashtra
-  ('Mumbai', 'Maharashtra'),
-  ('Pune', 'Maharashtra'),
-  ('Thane', 'Maharashtra'),
-  ('Solapur', 'Maharashtra'),
-  ('Navi Mumbai', 'Maharashtra'),
-  ('Beed', 'Maharashtra'),
-  ('Nagpur', 'Maharashtra'),
-  ('Mh', 'Maharashtra'),
-  ('Dudhani', 'Maharashtra'),
-  ('Ambernath', 'Maharashtra'),
-  ('Chandrapur', 'Maharashtra'),
-  ('Kalyan', 'Maharashtra'),
-  ('Mira Bhayander', 'Maharashtra'),
-  ('Chinchwad', 'Maharashtra'),
-  ('Pimpri-chinchwad', 'Maharashtra'),
-  ('Jalgaon District', 'Maharashtra'),
-  ('Pune-411044', 'Maharashtra'),
-  ('Pune, Maharashtra', 'Maharashtra'),
-  ('Navi Mumbai, Maharashtra', 'Maharashtra'),
-
-  -- Uttar Pradesh
-  ('Up', 'Uttar Pradesh'),
-  ('U.p.', 'Uttar Pradesh'),
-  ('Ghaziabad', 'Uttar Pradesh'),
-  ('Lucknow', 'Uttar Pradesh'),
-  ('Allahabad', 'Uttar Pradesh'),
-  ('Gautam Buddha Nagar', 'Uttar Pradesh'),
-  ('Kalyanpur Kanpur', 'Uttar Pradesh'),
-  ('Ayodhya', 'Uttar Pradesh'),
-  ('Azamgarh', 'Uttar Pradesh'),
-  ('Ambedkar Nagar', 'Uttar Pradesh'),
-  ('Moradabad', 'Uttar Pradesh'),
-  ('Varanasi', 'Uttar Pradesh'),
-  ('Aligarh', 'Uttar Pradesh'),
-  ('Faizabad', 'Uttar Pradesh'),
-
-  -- Tamil Nadu
-  ('Chennai', 'Tamil Nadu'),
-  ('Tamilnadu', 'Tamil Nadu'),
-  ('Salem', 'Tamil Nadu'),
-  ('Tiruvallur-602001', 'Tamil Nadu'),
-  ('Erode', 'Tamil Nadu'),
-  ('Vellore', 'Tamil Nadu'),
-  ('Thoothukudi', 'Tamil Nadu'),
-  ('Thanjavur', 'Tamil Nadu'),
-
-  -- Karnataka
-  ('Bengaluru', 'Karnataka'),
-  ('Bangalore', 'Karnataka'),
-  ('Chikmagalur', 'Karnataka'),
-  ('Belgaum', 'Karnataka'),
-  ('Udupi', 'Karnataka'),
-  ('Ka', 'Karnataka'),
-
-  -- Kerala
-  ('Ernakulam', 'Kerala'),
-  ('Thrissur', 'Kerala'),
-  ('Malappuram', 'Kerala'),
-  ('Kochi', 'Kerala'),
-  ('Kannur', 'Kerala'),
-  ('Alappuzha', 'Kerala'),
-  ('Palakkad', 'Kerala'),
-  ('Thiruvananthapuram', 'Kerala'),
-  ('Pathanamthitta', 'Kerala'),
-  ('Chittur', 'Kerala'),
-  ('Malappuram, Kerala', 'Kerala'),
-
-  -- West Bengal
-  ('Kolkata', 'West Bengal'),
-  ('Hooghly', 'West Bengal'),
-  ('Howrah', 'West Bengal'),
-  ('North 24 Parganas', 'West Bengal'),
-  ('Birbhum', 'West Bengal'),
-  ('Paschim Medinipur', 'West Bengal'),
-  ('Alipurduar', 'West Bengal'),
-  ('Murshidabad', 'West Bengal'),
-  ('Dinajpur', 'West Bengal'),
-  ('Rajarhat', 'West Bengal'),
-  ('Durgapur', 'West Bengal'),
-  ('Kharagpur', 'West Bengal'),
-  ('Puruliya', 'West Bengal'),
-  ('Chakdah', 'West Bengal'),
-
-  -- Gujarat
-  ('Ahmedabad', 'Gujarat'),
-  ('Surat', 'Gujarat'),
-  ('Mehsana', 'Gujarat'),
-  ('Bharuch', 'Gujarat'),
-  ('Gandhinagar', 'Gujarat'),
-  ('Rajkot', 'Gujarat'),
-  ('Surendranagar District', 'Gujarat'),
-  ('Veraval', 'Gujarat'),
-  ('Gj', 'Gujarat'),
-
-  -- Haryana
-  ('Gurugram', 'Haryana'),
-  ('Nit', 'Haryana'),
-  ('Nuh', 'Haryana'),
-  ('Jhajjar', 'Haryana'),
-  ('Kurukshetra', 'Haryana'),
-  ('Charkhi Dadri, Haryana', 'Haryana'),
-  ('Fatehabad, Haryana', 'Haryana'),
-
-  -- Punjab
-  ('Punjab Region', 'Punjab'),
-  ('Ludhiana', 'Punjab'),
-  ('Patiala', 'Punjab'),
-  ('Ropar', 'Punjab'),
-  ('Amritsar', 'Punjab'),
-  ('Gurdaspur', 'Punjab'),
-  ('Sangrur', 'Punjab'),
-  ('Mohali', 'Punjab'),
-  ('Zirakpur', 'Punjab'),
-
-  -- Delhi
-  ('New Delhi', 'Delhi'),
-  ('North West Delhi', 'Delhi'),
-  ('National Capital Territory Of Delhi', 'Delhi'),
-  ('Nct', 'Delhi'),
-  ('West Delhi', 'Delhi'),
-  ('Delhi Division', 'Delhi'),
-  ('Delhi Ncr', 'Delhi'),
-  ('Safdarjung Enclave', 'Delhi'),
-  ('Sector 56', 'Delhi'),
-  ('Ncr', 'Delhi'),
-
-  -- Rajasthan
-  ('Jaipur', 'Rajasthan'),
-  ('Jodhpur', 'Rajasthan'),
-  ('Durgapura', 'Rajasthan'),
-  ('Rajsamand, Rajasthan', 'Rajasthan'),
-  ('Pali-rajasthan', 'Rajasthan'),
-  ('Sikar', 'Rajasthan'),
-  ('Churu', 'Rajasthan'),
-  ('Udaipur', 'Rajasthan'),
-
-  -- Telangana
-  ('Hyderabad', 'Telangana'),
-  ('Secunderabad', 'Telangana'),
-  ('Telangana State', 'Telangana'),
-  ('Karimnagar', 'Telangana'),
-  ('Mandamarri', 'Telangana'),
-
-  -- Bihar
-  ('Gaya', 'Bihar'),
-  ('Jehanabad, Bihar', 'Bihar'),
-  ('Sitamarhi', 'Bihar'),
-  ('Saran', 'Bihar'),
-  ('Supaul', 'Bihar'),
-  ('Aurangabad-bihar', 'Bihar'),
-  ('Khaira', 'Bihar'),
-
-  -- Jammu and Kashmir
-  ('Jammu And Kashmir', 'Jammu and Kashmir'),
-  ('Jammu & Kashmir', 'Jammu and Kashmir'),
-  ('J&k', 'Jammu and Kashmir'),
-  ('Kupwara', 'Jammu and Kashmir'),
-  ('Anantnag', 'Jammu and Kashmir'),
-  ('Ganderbal', 'Jammu and Kashmir'),
-
-  -- Andhra Pradesh
-  ('Andhrapradesh', 'Andhra Pradesh'),
-  ('Kurnool', 'Andhra Pradesh'),
-  ('Rajahmundry', 'Andhra Pradesh'),
-  ('Chittoor', 'Andhra Pradesh'),
-  ('Prakasam District', 'Andhra Pradesh'),
-
-  -- Madhya Pradesh
-  ('Madhyapradesh', 'Madhya Pradesh'),
-  ('Guna, Madhya Pradesh', 'Madhya Pradesh'),
-  ('Dhar District, Madhya Pradesh', 'Madhya Pradesh'),
-  ('Jabalpur', 'Madhya Pradesh'),
-  ('Singrauli', 'Madhya Pradesh'),
-  ('Thatipur', 'Madhya Pradesh'),
-
-  -- Chhattisgarh
-  ('Durg', 'Chhattisgarh'),
-  ('Raipur', 'Chhattisgarh'),
-  ('Bhilai', 'Chhattisgarh'),
-  ('Chattisgarh', 'Chhattisgarh'),
-
-  -- Jharkhand
-  ('Bokaro', 'Jharkhand'),
-  ('Bokaro Steel City, Jharkhand', 'Jharkhand'),
-
-  -- Puducherry
-  ('Pondicherry', 'Puducherry'),
-
-  -- Assam
-  ('Silchar', 'Assam'),
-  ('Golaghat', 'Assam'),
-  ('Darrang', 'Assam'),
-  ('Sibsagar', 'Assam'),
-  ('Barpeta, Assam', 'Assam'),
-
-  -- Uttarakhand
-  ('Uttaranchal', 'Uttarakhand'),
-  ('Mukteshwar', 'Uttarakhand'),
-  ('Ut', 'Uttarakhand'),
-
-  -- Tripura
-  ('West Tripura', 'Tripura'),
-
-  -- Dadra and Nagar Haveli and Daman and Diu
-  ('Ut Of Dadra & Nagar Haveli And Daman Diu', 'Dadra and Nagar Haveli and Daman and Diu'),
-  ('Daman And Diu', 'Dadra and Nagar Haveli and Daman and Diu')
-
-AS t(alias, canonical);
-
--- COMMAND ----------
-
--- Cell 3: Main Silver table creation
+-- Cell 2: Main Silver table creation
 
 CREATE OR REPLACE TABLE workspace.default.silver_facility AS
 
-WITH nullified AS (
+WITH state_alias_map AS (
+  SELECT alias, canonical FROM VALUES
+    ('Mumbai', 'Maharashtra'),('Pune', 'Maharashtra'),('Thane', 'Maharashtra'),('Solapur', 'Maharashtra'),('Navi Mumbai', 'Maharashtra'),('Beed', 'Maharashtra'),('Nagpur', 'Maharashtra'),('Mh', 'Maharashtra'),('Dudhani', 'Maharashtra'),('Ambernath', 'Maharashtra'),('Chandrapur', 'Maharashtra'),('Kalyan', 'Maharashtra'),('Mira Bhayander', 'Maharashtra'),('Chinchwad', 'Maharashtra'),('Pimpri-chinchwad', 'Maharashtra'),('Jalgaon District', 'Maharashtra'),('Pune-411044', 'Maharashtra'),('Pune, Maharashtra', 'Maharashtra'),('Navi Mumbai, Maharashtra', 'Maharashtra'),
+    ('Up', 'Uttar Pradesh'),('U.p.', 'Uttar Pradesh'),('Ghaziabad', 'Uttar Pradesh'),('Lucknow', 'Uttar Pradesh'),('Allahabad', 'Uttar Pradesh'),('Gautam Buddha Nagar', 'Uttar Pradesh'),('Kalyanpur Kanpur', 'Uttar Pradesh'),('Ayodhya', 'Uttar Pradesh'),('Azamgarh', 'Uttar Pradesh'),('Ambedkar Nagar', 'Uttar Pradesh'),('Moradabad', 'Uttar Pradesh'),('Varanasi', 'Uttar Pradesh'),('Aligarh', 'Uttar Pradesh'),('Faizabad', 'Uttar Pradesh'),
+    ('Chennai', 'Tamil Nadu'),('Tamilnadu', 'Tamil Nadu'),('Salem', 'Tamil Nadu'),('Tiruvallur-602001', 'Tamil Nadu'),('Erode', 'Tamil Nadu'),('Vellore', 'Tamil Nadu'),('Thoothukudi', 'Tamil Nadu'),('Thanjavur', 'Tamil Nadu'),
+    ('Bengaluru', 'Karnataka'),('Bangalore', 'Karnataka'),('Chikmagalur', 'Karnataka'),('Belgaum', 'Karnataka'),('Udupi', 'Karnataka'),('Ka', 'Karnataka'),
+    ('Ernakulam', 'Kerala'),('Thrissur', 'Kerala'),('Malappuram', 'Kerala'),('Kochi', 'Kerala'),('Kannur', 'Kerala'),('Alappuzha', 'Kerala'),('Palakkad', 'Kerala'),('Thiruvananthapuram', 'Kerala'),('Pathanamthitta', 'Kerala'),('Chittur', 'Kerala'),('Malappuram, Kerala', 'Kerala'),
+    ('Kolkata', 'West Bengal'),('Hooghly', 'West Bengal'),('Howrah', 'West Bengal'),('North 24 Parganas', 'West Bengal'),('Birbhum', 'West Bengal'),('Paschim Medinipur', 'West Bengal'),('Alipurduar', 'West Bengal'),('Murshidabad', 'West Bengal'),('Dinajpur', 'West Bengal'),('Rajarhat', 'West Bengal'),('Durgapur', 'West Bengal'),('Kharagpur', 'West Bengal'),('Puruliya', 'West Bengal'),('Chakdah', 'West Bengal'),
+    ('Ahmedabad', 'Gujarat'),('Surat', 'Gujarat'),('Mehsana', 'Gujarat'),('Bharuch', 'Gujarat'),('Gandhinagar', 'Gujarat'),('Rajkot', 'Gujarat'),('Surendranagar District', 'Gujarat'),('Veraval', 'Gujarat'),('Gj', 'Gujarat'),
+    ('Gurugram', 'Haryana'),('Nit', 'Haryana'),('Nuh', 'Haryana'),('Jhajjar', 'Haryana'),('Kurukshetra', 'Haryana'),('Charkhi Dadri, Haryana', 'Haryana'),('Fatehabad, Haryana', 'Haryana'),
+    ('Punjab Region', 'Punjab'),('Ludhiana', 'Punjab'),('Patiala', 'Punjab'),('Ropar', 'Punjab'),('Amritsar', 'Punjab'),('Gurdaspur', 'Punjab'),('Sangrur', 'Punjab'),('Mohali', 'Punjab'),('Zirakpur', 'Punjab'),
+    ('New Delhi', 'Delhi'),('North West Delhi', 'Delhi'),('National Capital Territory Of Delhi', 'Delhi'),('Nct', 'Delhi'),('West Delhi', 'Delhi'),('Delhi Division', 'Delhi'),('Delhi Ncr', 'Delhi'),('Safdarjung Enclave', 'Delhi'),('Sector 56', 'Delhi'),('Ncr', 'Delhi'),
+    ('Jaipur', 'Rajasthan'),('Jodhpur', 'Rajasthan'),('Durgapura', 'Rajasthan'),('Rajsamand, Rajasthan', 'Rajasthan'),('Pali-rajasthan', 'Rajasthan'),('Sikar', 'Rajasthan'),('Churu', 'Rajasthan'),('Udaipur', 'Rajasthan'),
+    ('Hyderabad', 'Telangana'),('Secunderabad', 'Telangana'),('Telangana State', 'Telangana'),('Karimnagar', 'Telangana'),('Mandamarri', 'Telangana'),
+    ('Gaya', 'Bihar'),('Jehanabad, Bihar', 'Bihar'),('Sitamarhi', 'Bihar'),('Saran', 'Bihar'),('Supaul', 'Bihar'),('Aurangabad-bihar', 'Bihar'),('Khaira', 'Bihar'),
+    ('Jammu And Kashmir', 'Jammu and Kashmir'),('Jammu & Kashmir', 'Jammu and Kashmir'),('J&k', 'Jammu and Kashmir'),('Kupwara', 'Jammu and Kashmir'),('Anantnag', 'Jammu and Kashmir'),('Ganderbal', 'Jammu and Kashmir'),
+    ('Andhrapradesh', 'Andhra Pradesh'),('Kurnool', 'Andhra Pradesh'),('Rajahmundry', 'Andhra Pradesh'),('Chittoor', 'Andhra Pradesh'),('Prakasam District', 'Andhra Pradesh'),
+    ('Madhyapradesh', 'Madhya Pradesh'),('Guna, Madhya Pradesh', 'Madhya Pradesh'),('Dhar District, Madhya Pradesh', 'Madhya Pradesh'),('Jabalpur', 'Madhya Pradesh'),('Singrauli', 'Madhya Pradesh'),('Thatipur', 'Madhya Pradesh'),
+    ('Durg', 'Chhattisgarh'),('Raipur', 'Chhattisgarh'),('Bhilai', 'Chhattisgarh'),('Chattisgarh', 'Chhattisgarh'),
+    ('Bokaro', 'Jharkhand'),('Bokaro Steel City, Jharkhand', 'Jharkhand'),
+    ('Pondicherry', 'Puducherry'),
+    ('Silchar', 'Assam'),('Golaghat', 'Assam'),('Darrang', 'Assam'),('Sibsagar', 'Assam'),('Barpeta, Assam', 'Assam'),
+    ('Uttaranchal', 'Uttarakhand'),('Mukteshwar', 'Uttarakhand'),('Ut', 'Uttarakhand'),
+    ('West Tripura', 'Tripura'),
+    ('Ut Of Dadra & Nagar Haveli And Daman Diu', 'Dadra and Nagar Haveli and Daman and Diu'),('Daman And Diu', 'Dadra and Nagar Haveli and Daman and Diu')
+  AS t(alias, canonical)
+),
+
+nullified AS (
   SELECT
     -- Nullify every string column (string 'null' -> SQL NULL)
-    NULLIF(name, 'null')                                      AS name,
+    REGEXP_REPLACE(NULLIF(name, 'null'), '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]', '') AS name,
     NULLIF(phone_numbers, 'null')                             AS phone_numbers_raw,
     NULLIF(officialPhone, 'null')                             AS official_phone,
     NULLIF(email, 'null')                                     AS email,
@@ -255,7 +66,7 @@ WITH nullified AS (
     NULLIF(address_line1, 'null')                             AS address_line1,
     NULLIF(address_line2, 'null')                             AS address_line2,
     NULLIF(address_line3, 'null')                             AS address_line3,
-    NULLIF(address_city, 'null')                              AS address_city,
+    REGEXP_REPLACE(NULLIF(address_city, 'null'), '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]', '') AS address_city,
     NULLIF(address_stateOrRegion, 'null')                     AS state_raw,
     NULLIF(address_zipOrPostcode, 'null')                     AS pincode_raw,
     NULLIF(address_country, 'null')                           AS address_country,
@@ -263,7 +74,7 @@ WITH nullified AS (
     NULLIF(facilityTypeId, 'null')                            AS facility_type_id,
     NULLIF(operatorTypeId, 'null')                            AS operator_type_id,
     NULLIF(affiliationTypeIds, 'null')                        AS affiliation_type_ids_raw,
-    NULLIF(description, 'null')                               AS description,
+    REGEXP_REPLACE(NULLIF(description, 'null'), '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]', '') AS description,
     NULLIF(numberDoctors, 'null')                             AS number_doctors_raw,
     NULLIF(capacity, 'null')                                  AS capacity_raw,
     NULLIF(specialties, 'null')                               AS specialties_raw,

@@ -1,7 +1,5 @@
 import { NextRequest } from "next/server";
-
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+import { BACKEND_URL, backendHeaders } from "@/lib/backend";
 
 // Proxy GET /api/map?capability=<cap>&level=<level> to backend aggregates
 export async function GET(request: NextRequest) {
@@ -13,7 +11,7 @@ export async function GET(request: NextRequest) {
     `${BACKEND_URL}/api/map/aggregates?capability=${encodeURIComponent(capability)}&level=${encodeURIComponent(level)}`,
     {
       method: "GET",
-      headers: { Accept: "application/json" },
+      headers: await backendHeaders({ Accept: "application/json" }),
     }
   );
 

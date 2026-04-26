@@ -2,14 +2,14 @@
 
 ## URLs
 
-- **Frontend**: _TBD_ (Vercel)
-- **Backend (primary)**: _TBD_ (Databricks Apps)
+- **Frontend**: https://trustmap-india.vercel.app
+- **Backend (primary)**: https://trustmap-india-7474646917144080.aws.databricksapps.com
 - **Backend (failover)**: _TBD_ (Modal)
-- **Databricks workspace**: https://dbc-842dd1eb-38c2.cloud.databricks.com
+- **Databricks workspace**: https://dbc-d744432c-1635.cloud.databricks.com
 
 ## Pre-Demo Checklist
 
-- [ ] Databricks App is running (`databricks apps get trustmap-india --profile siraj-workspace`)
+- [ ] Databricks App is running (`databricks apps get trustmap-india --profile sj-wksp`)
 - [ ] Frontend loads on phone hotspot
 - [ ] Mapbox tiles load on hotspot
 - [ ] Full golden path demo works end-to-end
