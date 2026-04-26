@@ -1,10 +1,10 @@
-# TrustMap India
+# TrueCare Atlas
 
 > Agentic healthcare intelligence — trust-score 10,000 Indian medical facilities in minutes, not weeks.
 
 **Hack-Nation 2026 · Databricks Corporate Track**
 
-TrustMap India turns 10,000 noisy Indian healthcare facility records into a trustworthy, agentic capability map. An NGO programme lead searching for verified NICU care in rural Bihar gets a ranked, cited, trust-scored answer in 11 minutes — replacing 6 weeks of manual triage.
+TrueCare Atlas turns 10,000 noisy Indian healthcare facility records into a trustworthy, agentic capability map. An NGO programme lead searching for verified NICU care in rural Bihar gets a ranked, cited, trust-scored answer in 11 minutes — replacing 6 weeks of manual triage.
 
 ## Stack
 

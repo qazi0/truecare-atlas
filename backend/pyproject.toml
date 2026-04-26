@@ -1,7 +1,7 @@
 [project]
 name = "trustmap-india-backend"
 version = "0.1.0"
-description = "TrustMap India — FastAPI backend for agentic healthcare intelligence"
+description = "TrueCare Atlas — FastAPI backend for agentic healthcare intelligence"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

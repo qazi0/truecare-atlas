@@ -19,7 +19,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TrustMap India",
+  title: "TrueCare Atlas",
   description: "Agentic healthcare intelligence for 10,000 Indian medical facilities",
 };
 

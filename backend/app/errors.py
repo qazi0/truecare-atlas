@@ -1,4 +1,4 @@
-"""Domain exceptions for TrustMap India backend."""
+"""Domain exceptions for TrueCare Atlas backend."""
 
 
 class FacilityNotFoundError(Exception):

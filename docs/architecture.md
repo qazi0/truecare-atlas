@@ -1,4 +1,4 @@
-# Architecture — TrustMap India
+# Architecture — TrueCare Atlas
 
 ## Layered Overview
 

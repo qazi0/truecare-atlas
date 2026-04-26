@@ -1,4 +1,4 @@
-# TrustMap India — Code Architecture
+# TrueCare Atlas — Code Architecture
 
 > Canonical reference for Phase 5 (backend) and Phase 6 (frontend) implementation.
 > Any deviation from this document requires editing this file first.

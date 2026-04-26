@@ -1,4 +1,4 @@
-# Design System — TrustMap India
+# Design System — TrueCare Atlas
 
 ## Design Thesis
 
@@ -42,7 +42,7 @@ Card, Badge, Button, Input, Tooltip, Popover, Sheet, ScrollArea, Separator, Skel
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Top bar: TrustMap India · Search Input · Map / Audit / Plan tabs     │
+│ Top bar: TrueCare Atlas · Search Input · Map / Audit / Plan tabs     │
 ├────────────────┬───────────────────────────────────────┬─────────────┤
 │  REASONING     │  RESULTS / MAP / AUDIT (active view)  │  TRUST      │
 │  TRACE (300px) │  (flex-1)                             │  PANEL      │

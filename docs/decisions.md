@@ -1,4 +1,4 @@
-# TrustMap India — Decision Record
+# TrueCare Atlas — Decision Record
 
 > Log every data analysis query, experimental result, and architectural decision with the reasoning behind it. Future sessions read this to avoid re-running experiments.
 

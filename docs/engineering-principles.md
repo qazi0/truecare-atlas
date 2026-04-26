@@ -1,4 +1,4 @@
-# Engineering Principles — TrustMap India
+# Engineering Principles — TrueCare Atlas
 
 These rules sit above every other plan section. If a future decision contradicts them, these win.
 

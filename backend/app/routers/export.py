@@ -88,7 +88,7 @@ def export_facilities(request: ExportRequest):
     if request.format == ExportFormat.JSON:
         return JSONResponse(
             content=[r.model_dump() for r in export_rows],
-            headers={"Content-Disposition": "attachment; filename=trustmap_export.json"},
+            headers={"Content-Disposition": "attachment; filename=truecare_atlas_export.json"},
         )
 
     buf = io.StringIO()
@@ -103,5 +103,5 @@ def export_facilities(request: ExportRequest):
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=trustmap_export_{ts}.csv"},
+        headers={"Content-Disposition": f"attachment; filename=truecare_atlas_export_{ts}.csv"},
     )

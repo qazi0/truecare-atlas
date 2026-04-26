@@ -1,4 +1,4 @@
-"""TrustMap India — Eval script for the "18/20" pitch slide.
+"""TrueCare Atlas — Eval script for the "18/20" pitch slide.
 
 Runs three eval suites:
   1. Capability extraction: P/R on 30 hand-labeled facilities
@@ -136,7 +136,7 @@ def eval_retrieval() -> dict:
 
 def main():
     print("=" * 60)
-    print("TrustMap India — Eval Suite")
+    print("TrueCare Atlas — Eval Suite")
     print("=" * 60)
 
     print("\n1. Trust Scorer Eval (10 flagged + 10 clean)")

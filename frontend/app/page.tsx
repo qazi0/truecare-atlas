@@ -24,7 +24,7 @@ export default function Home() {
       <header className="flex items-center justify-between border-b border-border px-5 py-2.5 shrink-0 bg-surface">
         <div className="flex items-center gap-6">
           <h1 className="text-sm font-semibold tracking-tight text-text">
-            TrustMap India
+            TrueCare Atlas
           </h1>
           <nav className="flex gap-1">
             <TabButton
