@@ -69,6 +69,31 @@ def log_search_event(
         return
 
 
+def log_health_snapshot(snapshot: dict[str, Any]) -> bool:
+    if not _configured():
+        return False
+    checks = snapshot.get("checks") if isinstance(snapshot, dict) else {}
+    feature_checks = snapshot.get("feature_checks") if isinstance(snapshot, dict) else {}
+    payload = {
+        "status": snapshot.get("status"),
+        "sql_ok": bool((checks.get("sql") or {}).get("ok")),
+        "vector_search_ok": bool((checks.get("vector_search") or {}).get("ok")),
+        "metrics_ok": bool((checks.get("metrics") or {}).get("ok")),
+        "clinics_ok": bool((feature_checks.get("clinics") or {}).get("ok")),
+        "facility_lookup_ok": bool((feature_checks.get("facility_lookup") or {}).get("ok")),
+        "map_aggregates_ok": bool((feature_checks.get("map_aggregates") or {}).get("ok")),
+        "supabase_ok": bool((feature_checks.get("supabase") or {}).get("ok")),
+        "details": snapshot,
+        "created_at": _now(),
+    }
+    try:
+        with httpx.Client(timeout=5) as client:
+            resp = client.post(_table_url("health_checks"), headers=_headers(), json=payload)
+        return resp.status_code < 400
+    except Exception:
+        return False
+
+
 def recent_search_events(limit: int = 6) -> list[dict[str, Any]]:
     if not _configured():
         return []

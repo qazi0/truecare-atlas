@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     tavily_api_key: str = ""
+    health_monitor_enabled: bool = True
+    health_monitor_interval_seconds: int = 300
     cors_origins: list[str] = [
         "http://localhost:3000",
         "https://*.vercel.app",

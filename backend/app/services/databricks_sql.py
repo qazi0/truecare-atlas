@@ -53,6 +53,15 @@ _RULE_META: dict[str, tuple[str, Severity, list[str]]] = {
     "r8_evidence_sparsity":     ("Very sparse text — all claims unverifiable",             Severity.YELLOW, []),
 }
 
+_RETRYABLE_SQL_ERRORS = (
+    "error during request to server",
+    "invalid sessionhandle",
+    "temporarily unavailable",
+    "connection reset",
+    "broken pipe",
+    "connection aborted",
+)
+
 
 def wilson_ci(n: int, k: int, z: float = 1.96) -> tuple[float, float]:
     """Wilson score interval for binomial proportion k/n at confidence z.
@@ -69,16 +78,27 @@ def wilson_ci(n: int, k: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def _execute(sql: str, params: list | None = None) -> list[dict[str, Any]]:
-    conn = get_sql_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(sql, params or [])
-        cols = [d[0] for d in cursor.description]
-        return [dict(zip(cols, row)) for row in cursor.fetchall()]
-    except Exception as exc:
-        raise DatabricksQueryError(str(exc)) from exc
-    finally:
-        cursor.close()
+    for attempt in range(2):
+        conn = None
+        cursor = None
+        try:
+            conn = get_sql_connection()
+            cursor = conn.cursor()
+            cursor.execute(sql, params or [])
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except Exception as exc:
+            message = str(exc)
+            should_retry = attempt == 0 and any(token in message.lower() for token in _RETRYABLE_SQL_ERRORS)
+            if should_retry:
+                continue
+            raise DatabricksQueryError(message) from exc
+        finally:
+            if cursor is not None:
+                cursor.close()
+            if conn is not None:
+                conn.close()
+    raise DatabricksQueryError("Databricks SQL query failed after retry")
 
 
 def _filters_clause(filters: FacilityFilters | None, alias: str = "t") -> tuple[str, list]:

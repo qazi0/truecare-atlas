@@ -28,7 +28,14 @@ def enrich_facility_contact(facility: FacilityFull) -> ContactEnrichment:
 
     query = _query_for_facility(facility)
     client = TavilyClient(settings.tavily_api_key)
-    response = client.search(query=query, search_depth="advanced", max_results=5)
+    try:
+        response = client.search(query=query, search_depth="advanced", max_results=5)
+    except Exception as exc:
+        return ContactEnrichment(
+            facility_id=facility.facility_id,
+            query=query,
+            snippets=[f"Tavily enrichment request failed: {exc}"],
+        )
     results = response.get("results", []) if isinstance(response, dict) else []
     links: list[ContactLink] = []
     snippets: list[str] = []

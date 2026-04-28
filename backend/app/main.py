@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.errors import DatabricksQueryError, FacilityNotFoundError, VectorSearchError
 from app.settings import settings
+from app.services.health_monitor import build_health_snapshot, start_health_monitor, stop_health_monitor
 from app.routers import (
     audit,
     care_plan,
@@ -31,7 +32,9 @@ async def lifespan(app: FastAPI):
         mlflow.set_experiment(settings.mlflow_experiment)
     except Exception:
         pass
+    start_health_monitor()
     yield
+    stop_health_monitor()
 
 
 app = FastAPI(title="TrueCare Atlas", lifespan=lifespan)
@@ -75,34 +78,13 @@ async def vector_search_handler(request: Request, exc: VectorSearchError):
 
 @app.get("/api/health")
 def health():
-    from app.deps import get_sql_connection, get_workspace_client
-
-    checks: dict = {}
-
-    # SQL warehouse
-    try:
-        conn = get_sql_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT current_user()")
-        row = cursor.fetchone()
-        cursor.close()
-        checks["sql"] = {"ok": True, "user": row[0] if row else None}
-    except Exception as e:
-        checks["sql"] = {"ok": False, "error": str(e)}
-
-    # Vector search index
-    try:
-        w = get_workspace_client()
-        idx = w.vector_search_indexes.get_index(settings.vector_search_index)
-        checks["vector_search"] = {
-            "ok": idx.status.ready if idx.status else False,
-            "indexed_rows": idx.status.indexed_row_count if idx.status else 0,
-        }
-    except Exception as e:
-        checks["vector_search"] = {"ok": False, "error": str(e)}
-
-    all_ok = all(c.get("ok") for c in checks.values())
-    return {"status": "ok" if all_ok else "degraded", "checks": checks}
+    snapshot = build_health_snapshot(include_metrics=False)
+    return {
+        "status": snapshot["status"],
+        "generated_at": snapshot["generated_at"],
+        "checks": snapshot["checks"],
+        "feature_checks": snapshot["feature_checks"],
+    }
 
 
 @app.get("/api/search-quick")

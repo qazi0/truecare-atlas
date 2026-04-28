@@ -15,7 +15,6 @@ def get_workspace_client() -> WorkspaceClient:
     return WorkspaceClient()
 
 
-@lru_cache
 def get_sql_connection():
     w = get_workspace_client()
     cfg = w.config
